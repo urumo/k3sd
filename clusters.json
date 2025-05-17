@@ -1,0 +1,20 @@
+[
+  {
+    "address": "ip",
+    "user": "user",
+    "password": "pass",
+    "nodeName": "master",
+    "labels": "label1=value1",
+    "done": false,
+    "workers": [
+      {
+        "address": "ip2",
+        "user": "user2",
+        "password": "pass2",
+        "nodeName": "worker1",
+        "labels": "",
+        "done": false
+      }
+    ]
+  }
+]
