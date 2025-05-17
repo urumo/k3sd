@@ -8,18 +8,73 @@ on:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+    
+permissions:
+  contents: write
 
 jobs:
 
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
 
-    - name: Build
-      run: go build -v ./...
+      - name: Fetch dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v -o k3sd .
+
+      - name: Archive build artifact
+        run: tar -czvf k3sd.tar.gz k3sd
+
+      - name: Determine next version
+        id: next_version
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const latest = await github.rest.repos.getLatestRelease({ owner, repo }).catch(() => null);
+            
+            const currentVersion = latest ? latest.data.tag_name.replace(/^v/, '') : '0.0.0';
+            const [major, minor, patch] = currentVersion.split('.').map(Number);
+            const nextVersion = `v${major}.${minor}.${patch + 1}`;
+            
+            core.setOutput('tag', nextVersion);
+
+      - name: Create Tag and Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.next_version.outputs.tag }}
+          release_name: Release ${{ steps.next_version.outputs.tag }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./k3sd.tar.gz
+          asset_name: k3sd.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Release built files
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./k3sd
+          asset_name: k3sd-x86_64
+          asset_content_type: application/octet-stream
