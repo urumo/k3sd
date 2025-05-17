@@ -8,7 +8,18 @@ on:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
-    
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part of the version to bump?"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
 permissions:
   contents: write
 
@@ -40,12 +51,29 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
+            const bump = core.getInput('bump') || 'patch';
+            
             const latest = await github.rest.repos.getLatestRelease({ owner, repo }).catch(() => null);
-            
             const currentVersion = latest ? latest.data.tag_name.replace(/^v/, '') : '0.0.0';
-            const [major, minor, patch] = currentVersion.split('.').map(Number);
-            const nextVersion = `v${major}.${minor}.${patch + 1}`;
             
+            let [major, minor, patch] = currentVersion.split('.').map(Number);
+            
+            switch (bump) {
+              case 'major':
+                major++;
+                minor = 0;
+                patch = 0;
+                break;
+              case 'minor':
+                minor++;
+                patch = 0;
+                break;
+              default:
+                patch++;
+            }
+            
+            const nextVersion = `v${major}.${minor}.${patch}`;
+            console.log(`Bumping version to ${nextVersion} (${bump})`);
             core.setOutput('tag', nextVersion);
 
       - name: Create Tag and Release
