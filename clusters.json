@@ -6,6 +6,7 @@
     "nodeName": "master",
     "labels": "label1=value1",
     "done": false,
+    "domain": "example.com",
     "workers": [
       {
         "address": "ip2",

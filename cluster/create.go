@@ -7,21 +7,10 @@ import (
 	"log"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
-func CreateCluster() {
-	clusters, err := LoadClusters(utils.ConfigPath)
-	if err != nil {
-		log.Fatalf("failed to load clusters: %v", err)
-	}
-	defer func() {
-		if err := SaveClusters(utils.ConfigPath, clusters); err != nil {
-			log.Printf("failed to save clusters: %v", err)
-		}
-	}()
-
+func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 	for ci, cluster := range clusters {
 		config := &ssh.ClientConfig{
 			User: cluster.User,
@@ -33,30 +22,18 @@ func CreateCluster() {
 
 		client, err := ssh.Dial("tcp", cluster.Address+":22", config)
 		if err != nil {
-			log.Fatalf("failed to connect to server: %v", err)
+			return nil, fmt.Errorf("failed to dial: %v", err)
 		}
 		defer client.Close()
 
 		commands := baseClusterCommands(cluster)
 
-		appendOptionalApps(&commands)
-
-		localFiles := []string{
-			"./prom-stack-values.yaml",
-			"./cert-manager.yaml",
-			"./cert-manager.crds.yaml",
-			"./clusterissuer.yaml",
-			"./gitea.yaml",
-			"./traefik-values.yaml",
-		}
+		appendOptionalApps(&commands, cluster.Domain)
 
 		if !cluster.Done {
-			for _, localFile := range localFiles {
-				ScpFile(client, localFile, path.Join("/tmp", filepath.Base(localFile)))
-			}
 			fmt.Printf("Connecting to cluster: %s\n", cluster.Address)
 			if err := ExecuteCommands(client, commands); err != nil {
-				log.Printf("Error executing commands on cluster %s: %v\n", cluster.Address, err)
+				return nil, fmt.Errorf("Error executing commands on cluster %s: %v\n", cluster.Address, err)
 			}
 			clusters[ci].Done = true
 		}
@@ -80,19 +57,23 @@ func CreateCluster() {
 			}
 
 			if err := ExecuteCommands(client, workerCmds); err != nil {
-				log.Printf("Error executing worker join on cluster %s: %v\n", cluster.Address, err)
+				return nil, fmt.Errorf("Error executing worker join on cluster %s: %v\n", cluster.Address, err)
 			}
 		}
 
 		saveKubeConfig(client, cluster, clusters[ci].NodeName)
 	}
+
+	return clusters, nil
 }
 
 func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
 		"sudo apt-get upgrade -y",
-		"sudo apt-get install curl wget -y",
+		"sudo apt-get install curl wget zip unzip -y",
+		"wget https://geet.svck.dev/urumo/yamls/archive/v0.0.1.zip",
+		"unzip v0.0.1.zip -d /tmp",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
 		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.Labels),
@@ -101,32 +82,35 @@ func baseClusterCommands(cluster Cluster) []string {
 	}
 }
 
-func appendOptionalApps(commands *[]string) {
+func appendOptionalApps(commands *[]string, domain string) {
 	if utils.Flags["prometheus"] {
 		*commands = append(*commands,
 			"helm repo add prometheus-community https://prometheus-community.github.io/helm-charts",
 			"helm repo update prometheus-community",
-			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/prom-stack-values.yaml",
+			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/yamls/prom-stack-values.yaml",
 		)
 	}
 	if utils.Flags["cert-manager"] {
 		*commands = append(*commands,
-			"kubectl apply -f /tmp/cert-manager.crds.yaml",
-			"kubectl apply -f /tmp/cert-manager.yaml",
+			"kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml",
+			"kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml",
 			"sleep 30",
 		)
 	}
 	if utils.Flags["traefik-values"] {
 		*commands = append(*commands,
-			"kubectl apply -f /tmp/traefik-values.yaml",
+			"kubectl apply -f /tmp/yamls/traefik-values.yaml",
 			"while ! kubectl get deploy -n kube-system | grep -q traefik; do sleep 5; done; while [ $(kubectl get deploy -n kube-system | grep traefik | awk '{print $2}') != \"1/1\" ]; do sleep 5; done",
 		)
 	}
 	if utils.Flags["clusterissuer"] {
-		*commands = append(*commands, "kubectl apply -f /tmp/clusterissuer.yaml")
+		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/clusterissuer.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
 	}
 	if utils.Flags["gitea"] {
-		*commands = append(*commands, "kubectl apply -f /tmp/gitea.yaml")
+		*commands = append(*commands, "kubectl apply -f /tmp/yamls/gitea.yaml")
+		if utils.Flags["gitea-ingress"] {
+			*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.ingress.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
+		}
 	}
 }
 

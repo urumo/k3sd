@@ -3,6 +3,7 @@ package cluster
 type Cluster struct {
 	Worker
 	Workers []Worker `json:"workers"`
+	Domain  string   `json:"domain"`
 }
 
 type Worker struct {
