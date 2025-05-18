@@ -47,13 +47,15 @@ jobs:
       - name: Determine next version
         id: next_version
         uses: actions/github-script@v6
+        env:
+          BUMP: ${{ github.event.inputs.bump || 'patch' }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          inputs: |
-            bump: ${{ github.event.inputs.bump || 'patch' }}
           script: |
             const { owner, repo } = context.repo;
-            const bump = core.getInput('bump') || 'patch';
+            const bump = process.env.BUMP || 'patch';
+            
+            console.log(`Selected bump: ${bump}`);
             
             const latest = await github.rest.repos.getLatestRelease({ owner, repo }).catch(() => null);
             const currentVersion = latest ? latest.data.tag_name.replace(/^v/, '') : '0.0.0';
@@ -75,8 +77,9 @@ jobs:
             }
             
             const nextVersion = `v${major}.${minor}.${patch}`;
-            console.log(`Bumping version to ${nextVersion} (${bump})`);
+            console.log(`Next version: ${nextVersion}`);
             core.setOutput('tag', nextVersion);
+
 
       - name: Create Tag and Release
         id: create_release
