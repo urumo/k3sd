@@ -31,7 +31,7 @@ func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 		appendOptionalApps(&commands, cluster.Domain)
 
 		if !cluster.Done {
-			fmt.Printf("Connecting to cluster: %s\n", cluster.Address)
+			utils.Log("Connecting to cluster: %s\n", cluster.Address)
 			if err := ExecuteCommands(client, commands); err != nil {
 				return nil, fmt.Errorf("Error executing commands on cluster %s: %v\n", cluster.Address, err)
 			}
@@ -46,7 +46,7 @@ func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 
 			joinToken, err := ExecuteRemoteScript(client, "echo $(k3s token create)")
 			if err != nil {
-				log.Printf("Error generating token on cluster %s: %v\n", cluster.Address, err)
+				utils.Log("Error generating token on cluster %s: %v\n", cluster.Address, err)
 				continue
 			}
 
@@ -117,7 +117,7 @@ func appendOptionalApps(commands *[]string, domain string) {
 func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string) {
 	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml")
 	if err != nil {
-		log.Printf("Failed to read kubeconfig from %s: %v\n", cluster.Address, err)
+		utils.Log("Failed to read kubeconfig from %s: %v\n", cluster.Address, err)
 		return
 	}
 	kubeConfig = strings.Replace(kubeConfig, "127.0.0.1", cluster.Address, -1)

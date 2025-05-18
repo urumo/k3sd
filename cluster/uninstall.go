@@ -2,8 +2,8 @@ package cluster
 
 import (
 	"fmt"
+	"geet.svck.dev/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
-	"log"
 )
 
 func UninstallCluster(clusters []Cluster) ([]Cluster, error) {
@@ -26,13 +26,13 @@ func UninstallCluster(clusters []Cluster) ([]Cluster, error) {
 			if err := ExecuteCommands(client, []string{
 				fmt.Sprintf("ssh %s@%s \"k3s-agent-uninstall.sh\"", worker.User, worker.Address),
 			}); err != nil {
-				log.Printf("Error uninstalling worker on %s: %v\n", cluster.Address, err)
+				utils.Log("Error uninstalling worker on %s: %v\n", cluster.Address, err)
 			}
 			clusters[ci].Workers[wi].Done = false
 		}
 
 		if err := ExecuteCommands(client, []string{"k3s-uninstall.sh"}); err != nil {
-			log.Printf("Error uninstalling master on %s: %v\n", cluster.Address, err)
+			utils.Log("Error uninstalling master on %s: %v\n", cluster.Address, err)
 		}
 		clusters[ci].Done = false
 	}
