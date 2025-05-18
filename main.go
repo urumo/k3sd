@@ -9,17 +9,16 @@ import (
 func main() {
 	utils.ParseFlags()
 
+	clusters, err := cluster.LoadClusters(utils.ConfigPath)
+	if err != nil {
+		log.Fatalf("failed to load clusters: %v", err)
+	}
 	if utils.Uninstall {
-		cluster.UninstallCluster()
+		cluster.UninstallCluster(clusters)
 	} else {
-		clusters, err := cluster.LoadClusters(utils.ConfigPath)
-		if err != nil {
-			log.Fatalf("failed to load clusters: %v", err)
-		}
 		cluster.CreateCluster(clusters)
-
-		if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {
-			log.Fatalf("failed to save clusters: %v", err)
-		}
+	}
+	if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {
+		log.Fatalf("failed to save clusters: %v", err)
 	}
 }

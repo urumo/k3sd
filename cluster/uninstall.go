@@ -2,22 +2,11 @@ package cluster
 
 import (
 	"fmt"
-	"geet.svck.dev/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"log"
 )
 
-func UninstallCluster() {
-	clusters, err := LoadClusters(utils.ConfigPath)
-	if err != nil {
-		log.Fatalf("failed to load clusters: %v", err)
-	}
-	defer func() {
-		if err := SaveClusters(utils.ConfigPath, clusters); err != nil {
-			log.Printf("failed to save clusters: %v", err)
-		}
-	}()
-
+func UninstallCluster(clusters []Cluster) ([]Cluster, error) {
 	for ci, cluster := range clusters {
 		config := &ssh.ClientConfig{
 			User: cluster.User,
@@ -29,7 +18,7 @@ func UninstallCluster() {
 
 		client, err := ssh.Dial("tcp", cluster.Address+":22", config)
 		if err != nil {
-			log.Fatalf("failed to connect to server: %v", err)
+			return nil, fmt.Errorf("Error connecting to cluster %s: %v\n", cluster.Address, err)
 		}
 		defer client.Close()
 
@@ -47,4 +36,6 @@ func UninstallCluster() {
 		}
 		clusters[ci].Done = false
 	}
+
+	return clusters, nil
 }
