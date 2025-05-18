@@ -49,6 +49,8 @@ jobs:
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: |
+            bump: ${{ github.event.inputs.bump || 'patch' }}
           script: |
             const { owner, repo } = context.repo;
             const bump = core.getInput('bump') || 'patch';
