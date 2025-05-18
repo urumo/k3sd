@@ -7,6 +7,8 @@ import (
 )
 
 func main() {
+	go utils.LogWorker()
+
 	utils.ParseFlags()
 
 	clusters, err := cluster.LoadClusters(utils.ConfigPath)
