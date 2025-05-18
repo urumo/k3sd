@@ -1,4 +1,4 @@
-module k3sd
+module geet.svck.dev/urumo/k3sd
 
 go 1.24
 

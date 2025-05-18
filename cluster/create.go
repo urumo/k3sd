@@ -2,14 +2,13 @@ package cluster
 
 import (
 	"fmt"
+	"geet.svck.dev/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-
-	"k3sd/utils"
 )
 
 func CreateCluster() {

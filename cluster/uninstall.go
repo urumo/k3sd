@@ -2,8 +2,8 @@ package cluster
 
 import (
 	"fmt"
+	"geet.svck.dev/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
-	"k3sd/utils"
 	"log"
 )
 
