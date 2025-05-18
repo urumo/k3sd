@@ -9,6 +9,14 @@ import (
 	"io"
 )
 
+// ExecuteCommands runs a list of commands on a remote server via SSH.
+//
+// Parameters:
+//   - client: An established SSH client connection.
+//   - commands: A slice of strings, where each string is a command to be executed.
+//
+// Returns:
+//   - error: An error if any command fails to execute, or nil if all commands succeed.
 func ExecuteCommands(client *ssh.Client, commands []string) error {
 	for _, cmd := range commands {
 		if err := runCommand(client, cmd); err != nil {
@@ -18,6 +26,14 @@ func ExecuteCommands(client *ssh.Client, commands []string) error {
 	return nil
 }
 
+// runCommand creates an SSH session, streams the command's output, and executes the command.
+//
+// Parameters:
+//   - client: An established SSH client connection.
+//   - cmd: A string representing the command to be executed.
+//
+// Returns:
+//   - error: An error if the command fails to execute, or nil if it succeeds.
 func runCommand(client *ssh.Client, cmd string) error {
 	session, err := client.NewSession()
 	if err != nil {
@@ -35,6 +51,11 @@ func runCommand(client *ssh.Client, cmd string) error {
 	return session.Run(cmd)
 }
 
+// streamOutput reads from an io.Reader and logs each line of output.
+//
+// Parameters:
+//   - r: The io.Reader to read from (e.g., stdout or stderr).
+//   - isErr: A boolean indicating whether the output is from stderr (true) or stdout (false).
 func streamOutput(r io.Reader, isErr bool) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -47,6 +68,15 @@ func streamOutput(r io.Reader, isErr bool) {
 	}
 }
 
+// ExecuteRemoteScript runs a script on a remote server via SSH and returns its output.
+//
+// Parameters:
+//   - client: An established SSH client connection.
+//   - script: A string containing the script to be executed remotely.
+//
+// Returns:
+//   - string: The standard output of the script execution.
+//   - error: An error if the script fails to execute, or nil if it succeeds.
 func ExecuteRemoteScript(client *ssh.Client, script string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
