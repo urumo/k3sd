@@ -70,21 +70,21 @@ func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
-		"sudo apt-get upgrade -y",
+		//"sudo apt-get upgrade -y",
 		"sudo apt-get install curl wget zip unzip -y",
 		"wget https://geet.svck.dev/urumo/yamls/archive/v0.0.1.zip",
 		"unzip -o v0.0.1.zip -d /tmp",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
 		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.Labels),
-		"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
-		"helm version",
 	}
 }
 
 func appendOptionalApps(commands *[]string, domain string) {
 	if utils.Flags["prometheus"] {
 		*commands = append(*commands,
+			"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
+			"helm version",
 			"helm repo add prometheus-community https://prometheus-community.github.io/helm-charts",
 			"helm repo update prometheus-community",
 			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/yamls/prom-stack-values.yaml",
