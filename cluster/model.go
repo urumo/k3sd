@@ -2,8 +2,8 @@ package cluster
 
 type Cluster struct {
 	Worker
-	Workers []Worker `json:"workers"`
 	Domain  string   `json:"domain"`
+	Workers []Worker `json:"workers"`
 }
 
 type Worker struct {
