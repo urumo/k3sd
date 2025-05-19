@@ -10,6 +10,14 @@ import (
 	"strings"
 )
 
+// CreateCluster sets up a cluster and its workers by executing necessary commands remotely via SSH.
+//
+// Parameters:
+//   - clusters: A slice of Cluster objects representing the clusters to be created.
+//
+// Returns:
+//   - []Cluster: The updated slice of Cluster objects with their statuses updated.
+//   - Error: An error if any step in the cluster creation process fails.
 func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 	for ci, cluster := range clusters {
 		config := &ssh.ClientConfig{
@@ -67,6 +75,13 @@ func CreateCluster(clusters []Cluster) ([]Cluster, error) {
 	return clusters, nil
 }
 
+// baseClusterCommands generates a list of base commands to set up a cluster.
+//
+// Parameters:
+//   - cluster: A Cluster object representing the cluster to be set up.
+//
+// Returns:
+//   - []string: A slice of strings containing the commands to be executed.
 func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
@@ -80,6 +95,11 @@ func baseClusterCommands(cluster Cluster) []string {
 	}
 }
 
+// appendOptionalApps appends optional application installation commands to the provided command list.
+//
+// Parameters:
+//   - commands: A pointer to a slice of strings representing the base commands.
+//   - domain: A string representing the domain name for the cluster.
 func appendOptionalApps(commands *[]string, domain string) {
 	if utils.Flags["prometheus"] {
 		*commands = append(*commands,
@@ -114,6 +134,12 @@ func appendOptionalApps(commands *[]string, domain string) {
 	}
 }
 
+// saveKubeConfig retrieves the kubeconfig file from the cluster and saves it locally.
+//
+// Parameters:
+//   - client: An SSH client used to execute remote commands.
+//   - cluster: A Cluster object representing the cluster.
+//   - nodeName: A string representing the name of the node.
 func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string) {
 	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml")
 	if err != nil {
