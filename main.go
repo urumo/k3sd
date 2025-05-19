@@ -1,8 +1,8 @@
 package main
 
 import (
-	"geet.svck.dev/urumo/k3sd/cluster"
-	"geet.svck.dev/urumo/k3sd/utils"
+	"geet.svck.dev/urumo/k3sd_lib/cluster"
+	"geet.svck.dev/urumo/k3sd_lib/utils"
 	"log"
 )
 
