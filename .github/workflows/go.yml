@@ -37,7 +37,7 @@ jobs:
         run: go mod download
 
       - name: Build
-        run: go build -v -o k3sd .
+        run: go build -v -o k3sd ./cli/main.go
 
       - name: Archive build artifact
         run: tar -czvf k3sd.tar.gz k3sd

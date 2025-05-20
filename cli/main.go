@@ -1,13 +1,16 @@
 package main
 
 import (
-	"geet.svck.dev/urumo/k3sd_lib/cluster"
-	"geet.svck.dev/urumo/k3sd_lib/utils"
+	"geet.svck.dev/urumo/k3sd/cluster"
+	"geet.svck.dev/urumo/k3sd/utils"
 	"log"
 )
 
 func main() {
-	go utils.LogWorker()
+	logger := utils.NewLogger("cli")
+	go logger.LogWorker()
+	go logger.LogWorkerErr()
+	go logger.LogWorkerFile()
 
 	utils.ParseFlags()
 
@@ -16,9 +19,9 @@ func main() {
 		log.Fatalf("failed to load clusters: %v", err)
 	}
 	if utils.Uninstall {
-		cluster.UninstallCluster(clusters)
+		cluster.UninstallCluster(clusters, logger)
 	} else {
-		cluster.CreateCluster(clusters)
+		cluster.CreateCluster(clusters, logger)
 	}
 	if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {
 		log.Fatalf("failed to save clusters: %v", err)
