@@ -77,9 +77,6 @@ jobs:
           - os: darwin
             arch: arm64
             extension: ""
-          - os: windows
-            arch: amd64
-            extension: ".exe"
     steps:
       - uses: actions/checkout@v4
 
@@ -153,16 +150,6 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./k3sd-darwin-arm64/k3sd-darwin-arm64.tar.gz
           asset_name: k3sd-darwin-arm64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Windows AMD64 Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./k3sd-windows-amd64/k3sd-windows-amd64.tar.gz
-          asset_name: k3sd-windows-amd64.tar.gz
           asset_content_type: application/gzip
 
       - name: Upload Binary Assets
