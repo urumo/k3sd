@@ -21,7 +21,7 @@ func ParseFlags() {
 	prometheus := flag.Bool("prometheus", false, "Apply the Prometheus YAML")
 	uninstallFlag := flag.Bool("uninstall", false, "Uninstall the cluster")
 	linkerd := flag.Bool("linkerd", false, "Install linkerd")
-	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster")
+	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)")
 
 	flag.Parse()
 

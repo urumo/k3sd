@@ -53,6 +53,14 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 			clusters[ci].Done = true
 		}
 
+		if utils.Flags["linkerd"] {
+			installLinkerd(cluster, client, logger)
+		}
+
+		if utils.Flags["linkerd-mc"] {
+			installLinkerdMC(cluster, client, logger)
+		}
+
 		// Process each worker node in the cluster.
 		for wi, worker := range cluster.Workers {
 			if worker.Done {
@@ -85,6 +93,14 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 	}
 
 	return clusters, nil
+}
+
+func installLinkerdMC(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
+	installLinkerd(cluster, client, logger)
+}
+
+func installLinkerd(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
+
 }
 
 // baseClusterCommands generates a list of base commands to set up a cluster.
