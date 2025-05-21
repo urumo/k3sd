@@ -12,6 +12,19 @@ import (
 )
 
 func main() {
+
+	utils.ParseFlags()
+
+	if utils.VersionFlag {
+		fmt.Printf("K3SD version: %s\n", utils.Version)
+		os.Exit(0)
+	}
+
+	clusters, err := cluster.LoadClusters(utils.ConfigPath)
+	if err != nil {
+		log.Fatalf("failed to load clusters: %v", err)
+	}
+
 	logger := utils.NewLogger("cli")
 	go logger.LogWorker()
 	go logger.LogWorkerErr()
@@ -19,13 +32,6 @@ func main() {
 	go logger.LogWorkerCmd()
 
 	checkCommandExists()
-
-	utils.ParseFlags()
-
-	clusters, err := cluster.LoadClusters(utils.ConfigPath)
-	if err != nil {
-		log.Fatalf("failed to load clusters: %v", err)
-	}
 
 	if utils.Uninstall {
 		reader := bufio.NewReader(os.Stdin)

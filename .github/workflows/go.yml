@@ -93,11 +93,11 @@ jobs:
 
       - name: Build for ${{ matrix.os }}_${{ matrix.arch }}
         run: |
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -v -o k3sd${{ matrix.extension }} ./cli/main.go
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -v -ldflags "-X 'github.com/urumo/k3sd/utils.Version=${{ needs.determine-version.outputs.tag }}'" -o k3sd${{ matrix.extension }} ./cli/main.go
           file k3sd${{ matrix.extension }}
           chmod +x k3sd${{ matrix.extension }}
           tar -czvf k3sd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz k3sd${{ matrix.extension }}
-
+      
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

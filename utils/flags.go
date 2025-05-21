@@ -2,13 +2,14 @@ package utils
 
 import (
 	"flag"
-	"log"
+	"fmt"
 )
 
 var (
-	Flags      map[string]bool
-	ConfigPath string
-	Uninstall  bool
+	Flags       map[string]bool
+	ConfigPath  string
+	Uninstall   bool
+	VersionFlag bool
 )
 
 func ParseFlags() {
@@ -22,9 +23,11 @@ func ParseFlags() {
 	uninstallFlag := flag.Bool("uninstall", false, "Uninstall the cluster")
 	linkerd := flag.Bool("linkerd", false, "Install linkerd")
 	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)")
+	versionFlag := flag.Bool("version", false, "Print the version and exit")
 
 	flag.Parse()
 
+	VersionFlag = *versionFlag
 	Uninstall = *uninstallFlag
 	Flags = map[string]bool{
 		"cert-manager":   *certManager,
@@ -39,7 +42,8 @@ func ParseFlags() {
 
 	if *configPath != "" {
 		ConfigPath = *configPath
-	} else {
-		log.Fatalf("Must specify --config-path")
+	} else if !VersionFlag {
+		fmt.Println("Must specify --config-path")
+		flag.Usage()
 	}
 }
