@@ -282,7 +282,7 @@ func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
 		"sudo apt-get install curl wget zip unzip -y",
-		//"cd /tmp && wget https://geet.svck.dev/urumo/yamls/archive/v0.0.2.zip",
+		"cd /tmp && wget https://geet.svck.dev/urumo/yamls/archive/v0.0.2.zip",
 		"unzip -o /tmp/v0.0.2.zip -d /tmp",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
