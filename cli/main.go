@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"geet.svck.dev/urumo/k3sd/cluster"
-	"geet.svck.dev/urumo/k3sd/utils"
+	"github.com/urumo/k3sd/cluster"
+	"github.com/urumo/k3sd/utils"
 	"log"
 	"os"
 	"os/exec"
