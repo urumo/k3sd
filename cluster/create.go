@@ -13,8 +13,20 @@ import (
 	"strings"
 )
 
+// CreateCluster sets up a Kubernetes cluster and its workers, installs optional applications,
+// and configures Linkerd if specified.
+//
+// Parameters:
+// - clusters: A slice of Cluster objects representing the clusters to be created.
+// - logger: A pointer to a utils.Logger instance for logging operations.
+// - additional: A slice of additional commands to execute during cluster setup.
+//
+// Returns:
+// - A slice of updated Cluster objects.
+// - An error if any operation fails.
 func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string) ([]Cluster, error) {
 	for ci, cluster := range clusters {
+		// Establish an SSH connection to the cluster.
 		client, err := sshConnect(cluster.User, cluster.Password, cluster.Address)
 		if err != nil {
 			return nil, err
@@ -22,6 +34,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 		defer client.Close()
 
 		if !cluster.Done {
+			// Prepare and execute commands for setting up the cluster.
 			cmds := append(baseClusterCommands(cluster), additional...)
 			appendOptionalApps(&cmds, cluster.Domain)
 			logger.Log("Connecting to cluster: %s", cluster.Address)
@@ -31,6 +44,8 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			cl := &clusters[ci]
 			cl.Done = true
 			saveKubeConfig(client, cluster, cl.NodeName, logger)
+
+			// Install Linkerd if specified in the flags.
 			if utils.Flags["linkerd"] {
 				runLinkerdInstall(cluster, logger, false)
 			}
@@ -39,17 +54,22 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			}
 		}
 
+		// Configure worker nodes for the cluster.
 		for wi, worker := range cluster.Workers {
 			if worker.Done {
 				continue
 			}
 			cl := &clusters[ci].Workers[wi]
 			cl.Done = true
+
+			// Generate a token for the worker node to join the cluster.
 			token, err := ExecuteRemoteScript(client, "echo $(k3s token create)", logger)
 			if err != nil {
 				logger.Log("token error for %s: %v", cluster.Address, err)
 				continue
 			}
+
+			// Commands to join the worker node to the cluster.
 			joinCmds := []string{
 				fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
 				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token)),
@@ -59,11 +79,23 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 				return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
 			}
 		}
+
+		// Log the kubeconfig files for the cluster.
 		logFiles(logger)
 	}
 	return clusters, nil
 }
 
+// sshConnect establishes an SSH connection to a remote host.
+//
+// Parameters:
+// - user: The username for the SSH connection.
+// - pass: The password for the SSH connection.
+// - host: The address of the remote host.
+//
+// Returns:
+// - A pointer to an ssh.Client instance.
+// - An error if the connection fails.
 func sshConnect(user, pass, host string) (*ssh.Client, error) {
 	cfg := &ssh.ClientConfig{
 		User:            user,
@@ -73,6 +105,10 @@ func sshConnect(user, pass, host string) (*ssh.Client, error) {
 	return ssh.Dial("tcp", host+":22", cfg)
 }
 
+// logFiles reads and logs the contents of kubeconfig files for the cluster.
+//
+// Parameters:
+// - logger: A pointer to a utils.Logger instance for logging operations.
 func logFiles(logger *utils.Logger) {
 	dir := path.Join("./kubeconfigs", logger.Id)
 	files, err := os.ReadDir(dir)
@@ -92,6 +128,12 @@ func logFiles(logger *utils.Logger) {
 	}
 }
 
+// runLinkerdInstall installs and configures Linkerd on the cluster.
+//
+// Parameters:
+// - cluster: The Cluster object representing the cluster.
+// - logger: A pointer to a utils.Logger instance for logging operations.
+// - Multicluster: A boolean indicating whether to install Linkerd multicluster.
 func runLinkerdInstall(cluster Cluster, logger *utils.Logger, multicluster bool) {
 	dir := path.Join("./kubeconfigs", logger.Id)
 	kubeconfig := path.Join(dir, fmt.Sprintf("%s.yaml", cluster.NodeName))
@@ -119,6 +161,14 @@ func runLinkerdInstall(cluster Cluster, logger *utils.Logger, multicluster bool)
 	}
 }
 
+// runLinkerdCmd executes a Linkerd command with the specified arguments.
+//
+// Parameters:
+// - cmd: The Linkerd command to execute.
+// - args: A slice of arguments for the command.
+// - logger: A pointer to a utils.Logger instance for logging operations.
+// - kubeconfig: The path to the kubeconfig file.
+// - Apply: A boolean indicating whether to apply the command output.
 func runLinkerdCmd(cmd string, args []string, logger *utils.Logger, kubeconfig string, apply bool) {
 	parts := append([]string{cmd}, args...)
 	c := exec.Command("linkerd", parts...)
@@ -129,11 +179,22 @@ func runLinkerdCmd(cmd string, args []string, logger *utils.Logger, kubeconfig s
 	}
 }
 
+// installCRDs installs the Linkerd CRDs on the cluster.
+//
+// Parameters:
+// - kubeconfig: The path to the kubeconfig file.
+// - logger: A pointer to a utils.Logger instance for logging operations.
 func installCRDs(kubeconfig string, logger *utils.Logger) {
 	run := exec.Command("linkerd", "install", "--crds", "--kubeconfig", kubeconfig)
 	pipeAndApply(run, kubeconfig, logger)
 }
 
+// createRootCerts generates root certificates for Linkerd.
+//
+// Parameters:
+// - dir: The directory to store the certificates.
+// - cluster: The Cluster object representing the cluster.
+// - Logger: A pointer to a utils.Logger instance for logging operations.
 func createRootCerts(dir string, cluster Cluster, logger *utils.Logger) {
 	cmd := exec.Command("step", "certificate", "create",
 		"identity.linkerd.cluster.local",
@@ -145,6 +206,12 @@ func createRootCerts(dir string, cluster Cluster, logger *utils.Logger) {
 	pipeAndLog(cmd, logger)
 }
 
+// createIssuerCerts generates issuer certificates for Linkerd.
+//
+// Parameters:
+// - dir: The directory to store the certificates.
+// - cluster: The Cluster object representing the cluster.
+// - Logger: A pointer to a utils.Logger instance for logging operations.
 func createIssuerCerts(dir string, cluster Cluster, logger *utils.Logger) {
 	cmd := exec.Command("step", "certificate", "create",
 		fmt.Sprintf("identity.linkerd.%s", cluster.Domain),
@@ -159,6 +226,11 @@ func createIssuerCerts(dir string, cluster Cluster, logger *utils.Logger) {
 	pipeAndLog(cmd, logger)
 }
 
+// pipeAndLog streams the output of a command to the logger.
+//
+// Parameters:
+// - cmd: The command to execute.
+// - logger: A pointer to a utils.Logger instance for logging operations.
 func pipeAndLog(cmd *exec.Cmd, logger *utils.Logger) {
 	outPipe, _ := cmd.StdoutPipe()
 	errPipe, _ := cmd.StderrPipe()
@@ -169,6 +241,12 @@ func pipeAndLog(cmd *exec.Cmd, logger *utils.Logger) {
 	logger.Log("Command executed successfully")
 }
 
+// pipeAndApply streams the output of a command and applies it using kubectl.
+//
+// Parameters:
+// - cmd: The command to execute.
+// - kubeconfig: The path to the kubeconfig file.
+// - Logger: A pointer to a utils.Logger instance for logging operations.
 func pipeAndApply(cmd *exec.Cmd, kubeconfig string, logger *utils.Logger) {
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -193,6 +271,13 @@ func pipeAndApply(cmd *exec.Cmd, kubeconfig string, logger *utils.Logger) {
 	logger.Log("Apply output:\n%s", string(out))
 }
 
+// baseClusterCommands returns a list of base commands for setting up a cluster.
+//
+// Parameters:
+// - cluster: The Cluster object representing the cluster.
+//
+// Returns:
+// - A slice of strings containing the base commands.
 func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
@@ -205,6 +290,11 @@ func baseClusterCommands(cluster Cluster) []string {
 	}
 }
 
+// appendOptionalApps appends optional application installation commands to the provided command list.
+//
+// Parameters:
+// - commands: A pointer to a slice of strings containing the commands.
+// - domain: The domain name for the cluster.
 func appendOptionalApps(commands *[]string, domain string) {
 	if utils.Flags["prometheus"] {
 		*commands = append(*commands,
@@ -239,6 +329,13 @@ func appendOptionalApps(commands *[]string, domain string) {
 	}
 }
 
+// saveKubeConfig retrieves and saves the kubeconfig file for the cluster.
+//
+// Parameters:
+// - client: A pointer to an ssh.Client instance for the SSH connection.
+// - cluster: The Cluster object representing the cluster.
+// - nodeName: The name of the node.
+// - logger: A pointer to a utils.Logger instance for logging operations.
 func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger *utils.Logger) {
 	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml", logger)
 	if err != nil {
@@ -251,6 +348,12 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 	createFile(kubeConfigPath, kubeConfig, logger)
 }
 
+// createFile creates a file with the specified content.
+//
+// Parameters:
+// - filePath: The path to the file to be created.
+// - content: The content to write to the file.
+// - Logger: A pointer to a utils.Logger instance for logging operations.
 func createFile(filePath, content string, logger *utils.Logger) {
 	if err := os.MkdirAll(path.Dir(filePath), os.ModePerm); err != nil {
 		log.Fatalf("Error creating directory: %v\n", err)
