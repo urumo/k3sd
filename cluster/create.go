@@ -14,12 +14,15 @@ import (
 //
 // Parameters:
 //   - clusters: A slice of Cluster objects representing the clusters to be created.
+//   - logger: A pointer to a Logger object used for logging messages.
+//   - additionalCommands: A slice of strings containing additional commands to be executed.
 //
 // Returns:
 //   - []Cluster: The updated slice of Cluster objects with their statuses updated.
-//   - Error: An error if any step in the cluster creation process fails.
-func CreateCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, error) {
+//   - error: An error if any step in the cluster creation process fails.
+func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands []string) ([]Cluster, error) {
 	for ci, cluster := range clusters {
+		// Configure SSH client for connecting to the cluster.
 		config := &ssh.ClientConfig{
 			User: cluster.User,
 			Auth: []ssh.AuthMethod{
@@ -28,16 +31,20 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, error) 
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		}
 
+		// Establish an SSH connection to the cluster.
 		client, err := ssh.Dial("tcp", cluster.Address+":22", config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial: %v", err)
 		}
 		defer client.Close()
 
-		commands := baseClusterCommands(cluster)
+		// Combine base cluster commands with additional commands.
+		commands := append(baseClusterCommands(cluster), additionalCommands...)
 
+		// Append optional application installation commands.
 		appendOptionalApps(&commands, cluster.Domain)
 
+		// Execute commands on the cluster if it is not already marked as done.
 		if !cluster.Done {
 			logger.Log("Connecting to cluster: %s\n", cluster.Address)
 			if err := ExecuteCommands(client, commands, logger); err != nil {
@@ -46,29 +53,34 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, error) 
 			clusters[ci].Done = true
 		}
 
+		// Process each worker node in the cluster.
 		for wi, worker := range cluster.Workers {
 			if worker.Done {
 				continue
 			}
 			clusters[ci].Workers[wi].Done = true
 
+			// Generate a join token for the worker node.
 			joinToken, err := ExecuteRemoteScript(client, "echo $(k3s token create)")
 			if err != nil {
 				logger.Log("Error generating token on cluster %s: %v\n", cluster.Address, err)
 				continue
 			}
 
+			// Define commands to set up the worker node.
 			workerCmds := []string{
 				fmt.Sprintf("ssh %s@%s \"sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install curl wget -y\"", worker.User, worker.Address),
 				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(joinToken)),
 				fmt.Sprintf("kubectl label node %s %s --overwrite", worker.NodeName, worker.Labels),
 			}
 
+			// Execute worker setup commands.
 			if err := ExecuteCommands(client, workerCmds, logger); err != nil {
 				return nil, fmt.Errorf("Error executing worker join on cluster %s: %v\n", cluster.Address, err)
 			}
 		}
 
+		// Save the kubeconfig file for the cluster.
 		saveKubeConfig(client, cluster, clusters[ci].NodeName, logger)
 	}
 
@@ -140,6 +152,7 @@ func appendOptionalApps(commands *[]string, domain string) {
 //   - client: An SSH client used to execute remote commands.
 //   - cluster: A Cluster object representing the cluster.
 //   - nodeName: A string representing the name of the node.
+//   - logger: A pointer to a Logger object used for logging messages.
 func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger *utils.Logger) {
 	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml")
 	if err != nil {

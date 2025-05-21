@@ -21,7 +21,7 @@ func main() {
 	if utils.Uninstall {
 		cluster.UninstallCluster(clusters, logger)
 	} else {
-		cluster.CreateCluster(clusters, logger)
+		cluster.CreateCluster(clusters, logger, []string{})
 	}
 	if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {
 		log.Fatalf("failed to save clusters: %v", err)
