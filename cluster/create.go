@@ -61,7 +61,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 			clusters[ci].Workers[wi].Done = true
 
 			// Generate a join token for the worker node.
-			joinToken, err := ExecuteRemoteScript(client, "echo $(k3s token create)")
+			joinToken, err := ExecuteRemoteScript(client, "echo $(k3s token create)", logger)
 			if err != nil {
 				logger.Log("Error generating token on cluster %s: %v\n", cluster.Address, err)
 				continue
@@ -154,7 +154,7 @@ func appendOptionalApps(commands *[]string, domain string) {
 //   - nodeName: A string representing the name of the node.
 //   - logger: A pointer to a Logger object used for logging messages.
 func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger *utils.Logger) {
-	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml")
+	kubeConfig, err := ExecuteRemoteScript(client, "cat /etc/rancher/k3s/k3s.yaml", logger)
 	if err != nil {
 		logger.Log("Failed to read kubeconfig from %s: %v\n", cluster.Address, err)
 		return
@@ -163,7 +163,7 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 
 	logger.LogFile(kubeConfig)
 
-	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s.yaml", nodeName))
+	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", nodeName, nodeName))
 	if err := os.MkdirAll(path.Dir(kubeConfigPath), os.ModePerm); err != nil {
 		log.Fatalf("Error creating directory: %v\n", err)
 	}

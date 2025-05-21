@@ -47,7 +47,7 @@ func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 	go streamOutput(stdout, false, logger)
 	go streamOutput(stderr, true, logger)
 
-	logger.Log("Running command: %s", cmd)
+	logger.LogCmd(cmd)
 	return session.Run(cmd)
 }
 
@@ -77,7 +77,7 @@ func streamOutput(r io.Reader, isErr bool, logger *utils.Logger) {
 // Returns:
 //   - string: The standard output of the script execution.
 //   - error: An error if the script fails to execute, or nil if it succeeds.
-func ExecuteRemoteScript(client *ssh.Client, script string) (string, error) {
+func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %v", err)
@@ -88,7 +88,9 @@ func ExecuteRemoteScript(client *ssh.Client, script string) (string, error) {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	if err := session.Run(fmt.Sprintf("bash -c '%s'", script)); err != nil {
+	command := fmt.Sprintf("bash -c '%s'", script)
+	logger.LogCmd(command)
+	if err := session.Run(command); err != nil {
 		return "", fmt.Errorf("error executing script: %v, stderr: %s", err, stderr.String())
 	}
 
