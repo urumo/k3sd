@@ -92,11 +92,10 @@ jobs:
         run: go mod download
 
       - name: Build for ${{ matrix.os }}_${{ matrix.arch }}
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
         run: |
-          go build -v -o k3sd${{ matrix.extension }} ./cli/main.go
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -v -o k3sd${{ matrix.extension }} ./cli/main.go
+          file k3sd${{ matrix.extension }}
+          chmod +x k3sd${{ matrix.extension }}
           tar -czvf k3sd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz k3sd${{ matrix.extension }}
 
       - name: Upload build artifact
