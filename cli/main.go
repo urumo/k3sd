@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"geet.svck.dev/urumo/k3sd/cluster"
 	"geet.svck.dev/urumo/k3sd/utils"
 	"log"
-
-	"github.com/rivo/tview"
+	"os"
+	"strings"
 )
 
 func main() {
@@ -22,21 +24,16 @@ func main() {
 	}
 
 	if utils.Uninstall {
-		app := tview.NewApplication()
-		modal := tview.NewModal().
-			SetText("Are you sure you want to uninstall the clusters?").
-			AddButtons([]string{"Yes", "No"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Yes" {
-					cluster.UninstallCluster(clusters, logger)
-					app.Stop()
-				} else {
-					app.Stop()
-				}
-			})
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("Are you sure you want to uninstall the clusters? (yes/no): ")
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
 
-		if err := app.SetRoot(modal, true).Run(); err != nil {
-			log.Fatalf("failed to start TUI: %v", err)
+		if response == "yes" {
+			cluster.UninstallCluster(clusters, logger)
+		} else {
+			fmt.Println("Uninstallation canceled.")
+			return
 		}
 	} else {
 		cluster.CreateCluster(clusters, logger, []string{})
