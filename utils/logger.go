@@ -8,11 +8,16 @@ import (
 // Logger represents a logging utility with unique channels for different log types
 // and an identifier for the logger instance.
 type Logger struct {
-	Stdout chan string // Channel for standard log messages.
-	Stderr chan string // Channel for error log messages.
-	File   chan string // Channel for file log messages.
-	Cmd    chan string // Channel for command log messages.
-	Id     string      // Identifier for the logger instance.
+	Stdout chan string       // Channel for standard log messages.
+	Stderr chan string       // Channel for error log messages.
+	File   chan FileWithInfo // Channel for file log messages.
+	Cmd    chan string       // Channel for command log messages.
+	Id     string            // Identifier for the logger instance.
+}
+
+type FileWithInfo struct {
+	FileName string
+	Content  string
 }
 
 // NewLogger initializes a new Logger instance with unique channels and an identifier.
@@ -26,7 +31,7 @@ func NewLogger(id string) *Logger {
 	return &Logger{
 		Stdout: make(chan string, 100),
 		Stderr: make(chan string, 100),
-		File:   make(chan string, 100),
+		File:   make(chan FileWithInfo, 100),
 		Cmd:    make(chan string, 100),
 		Id:     id,
 	}
@@ -55,8 +60,8 @@ func (l *Logger) LogErr(format string, args ...interface{}) {
 // Parameters:
 //   - format: A string containing the format of the log message (similar to fmt.Sprintf).
 //   - args: A variadic list of arguments to be formatted into the log message.
-func (l *Logger) LogFile(format string, args ...interface{}) {
-	l.File <- fmt.Sprintf(format, args...)
+func (l *Logger) LogFile(filePath, content string) {
+	l.File <- FileWithInfo{FileName: filePath, Content: content}
 }
 
 // LogCmd formats a command log message and sends it to the Stdout channel.
@@ -95,7 +100,11 @@ func (l *Logger) LogWorkerErr() {
 func (l *Logger) LogWorkerFile() {
 	delimiter := "----------------------------------------"
 	for logMessage := range l.File {
-		log.Println(fmt.Sprintf("[FILE] \n%s\n%s\n%s\n", delimiter, logMessage, delimiter))
+		strings := []string{delimiter, logMessage.FileName, delimiter, logMessage.Content, delimiter, logMessage.FileName, delimiter}
+		log.Println("[FILE]")
+		for _, s := range strings {
+			log.Println(s)
+		}
 	}
 }
 

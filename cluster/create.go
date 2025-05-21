@@ -91,9 +91,34 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 				return nil, fmt.Errorf("Error executing worker join on cluster %s: %v\n", cluster.Address, err)
 			}
 		}
+
+		logFiles(logger)
 	}
 
 	return clusters, nil
+}
+
+func logFiles(logger *utils.Logger) {
+	dir := path.Join("./kubeconfigs", logger.Id)
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		log.Fatalf("Error reading directory: %v\n", err)
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		filePath := path.Join(dir, file.Name())
+		content, err := os.ReadFile(filePath)
+
+		if err != nil {
+			log.Fatalf("Error reading file %s: %v\n", filePath, err)
+		}
+
+		logger.LogFile(filePath, string(content))
+	}
 }
 
 func installLinkerdMC(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
