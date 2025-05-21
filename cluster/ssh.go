@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"geet.svck.dev/urumo/k3sd/utils"
+	"github.com/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"io"
 )
