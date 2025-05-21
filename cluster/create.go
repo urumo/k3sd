@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bufio"
 	"fmt"
 	"geet.svck.dev/urumo/k3sd/utils"
 	"golang.org/x/crypto/ssh"
@@ -52,14 +53,16 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 				return nil, fmt.Errorf("Error executing commands on cluster %s: %v\n", cluster.Address, err)
 			}
 			clusters[ci].Done = true
-		}
 
-		if utils.Flags["linkerd"] {
-			installLinkerd(cluster, client, logger)
-		}
+			saveKubeConfig(client, cluster, clusters[ci].NodeName, logger)
 
-		if utils.Flags["linkerd-mc"] {
-			installLinkerdMC(cluster, client, logger)
+			if utils.Flags["linkerd"] {
+				installLinkerd(cluster, client, logger)
+			}
+
+			if utils.Flags["linkerd-mc"] {
+				installLinkerdMC(cluster, client, logger)
+			}
 		}
 
 		// Process each worker node in the cluster.
@@ -88,28 +91,170 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 				return nil, fmt.Errorf("Error executing worker join on cluster %s: %v\n", cluster.Address, err)
 			}
 		}
-
-		// Save the kubeconfig file for the cluster.
-		saveKubeConfig(client, cluster, clusters[ci].NodeName, logger)
 	}
 
 	return clusters, nil
 }
 
 func installLinkerdMC(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
+	// Install Linkerd first
 	installLinkerd(cluster, client, logger)
+
+	// Define the kubeconfig path
+	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
+
+	// Construct the Linkerd multicluster install command
+	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "multicluster", "install")
+
+	// Set up pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Capture the YAML output
+	var yamlOutput strings.Builder
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			yamlOutput.WriteString(line + "\n")
+		}
+	}()
+
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Apply the YAML to the cluster
+	applyCmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "apply", "-f", "-")
+	applyCmd.Stdin = strings.NewReader(yamlOutput.String())
+
+	applyOutput, err := applyCmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Failed to apply multicluster YAML to the cluster: %v\nOutput: %s", err, string(applyOutput))
+	}
+
+	logger.Log("Linkerd multicluster installed successfully:\n%s", string(applyOutput))
+
+	// Perform a multicluster check
+	checkCmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "multicluster", "check")
+	checkOutput, err := checkCmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Linkerd multicluster check failed: %v\nOutput: %s", err, string(checkOutput))
+	}
+
+	logger.Log("Linkerd multicluster check completed successfully:\n%s", string(checkOutput))
 }
 
 func installLinkerd(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
 	createRootCerts(logger)
-	checkLinkerdCmd(cluster, logger)
+	checkLinkerdCmd(cluster, logger, true)
 	installLinkerdCRDS(cluster, logger)
+	installLinkerdCmd(cluster, logger)
+	checkLinkerdCmd(cluster, logger, false)
 }
 
-func installLinkerdCRDS(cluster Cluster, logger *utils.Logger) {
-	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
+func installLinkerdCmd(cluster Cluster, logger *utils.Logger) {
+	createClusterCerts(cluster, logger)
+	dir := path.Join("./kubeconfigs", logger.Id)
+	kubeconfigPath := path.Join(dir, fmt.Sprintf("%s.yaml", cluster.NodeName))
 
-	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "install", "--crds", " | ", "kubectl", "apply", "-f", "-")
+	// Define paths for the issuer certificate and key
+	crt := fmt.Sprintf("%s/%s-issuer.crt", dir, cluster.NodeName)
+	key := fmt.Sprintf("%s/%s-issuer.key", dir, cluster.NodeName)
+
+	// Construct the Linkerd install command
+	cmd := exec.Command("linkerd",
+		"--kubeconfig", kubeconfigPath, "install",
+		"--proxy-log-level=linkerd=debug,warn",
+		"--cluster-domain=cluster.local",
+		"--identity-trust-domain=cluster.local",
+		fmt.Sprintf("--identity-trust-anchors-file=%s/ca.crt", dir),
+		fmt.Sprintf("--identity-issuer-certificate-file=%s", crt),
+		fmt.Sprintf("--identity-issuer-key-file=%s", key),
+	)
+
+	// Set up pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Capture the YAML output
+	var yamlOutput strings.Builder
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			yamlOutput.WriteString(line + "\n")
+		}
+	}()
+
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Apply the YAML to the cluster
+	applyCmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "apply", "-f", "-")
+	applyCmd.Stdin = strings.NewReader(yamlOutput.String())
+
+	applyOutput, err := applyCmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Failed to apply YAML to the cluster: %v\nOutput: %s", err, string(applyOutput))
+	}
+
+	logger.Log("Linkerd installed successfully:\n%s", string(applyOutput))
+}
+
+func createClusterCerts(cluster Cluster, logger *utils.Logger) {
+	dir := path.Join("./kubeconfigs", logger.Id)
+
+	// Define the paths for the certificate and key
+	crt := fmt.Sprintf("%s/%s-issuer.crt", dir, cluster.NodeName)
+	key := fmt.Sprintf("%s/%s-issuer.key", dir, cluster.NodeName)
+
+	// Construct the command to create the intermediate certificate
+	cmd := exec.Command("step", "certificate", "create",
+		fmt.Sprintf("identity.linkerd.%s", cluster.Domain),
+		crt,
+		key,
+		"--ca", fmt.Sprintf("%s/ca.crt", dir),
+		"--ca-key", fmt.Sprintf("%s/ca.key", dir),
+		"--profile", "intermediate-ca",
+		"--not-after", "438000h",
+		"--no-password",
+		"--insecure",
+		"--force",
+	)
+
+	// Set up pipes for stdout and stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Fatalf("Failed to get stdout pipe: %v", err)
@@ -134,13 +279,67 @@ func installLinkerdCRDS(cluster Cluster, logger *utils.Logger) {
 		log.Fatalf("Command execution failed: %v", err)
 	}
 
-	logger.Log("Command executed successfully")
+	logger.Log("Cluster certificates created successfully")
 }
 
-func checkLinkerdCmd(cluster Cluster, logger *utils.Logger) {
+func installLinkerdCRDS(cluster Cluster, logger *utils.Logger) {
 	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
 
-	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "check", "--pre")
+	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "install", "--crds")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Capture the YAML output
+	var yamlOutput strings.Builder
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			yamlOutput.WriteString(line + "\n")
+		}
+	}()
+
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Apply the YAML to the cluster
+	applyCmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "apply", "-f", "-")
+	applyCmd.Stdin = strings.NewReader(yamlOutput.String())
+
+	applyOutput, err := applyCmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Failed to apply YAML to the cluster: %v\nOutput: %s", err, string(applyOutput))
+	}
+
+	logger.Log("YAML applied successfully:\n%s", string(applyOutput))
+}
+
+func checkLinkerdCmd(cluster Cluster, logger *utils.Logger, pre bool) {
+	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
+	args := []string{
+		"--kubeconfig", kubeconfigPath,
+		"check",
+	}
+	if pre {
+		args = append(args, "--pre")
+	}
+	cmd := exec.Command("linkerd", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -295,6 +494,4 @@ func createFile(filePath, content string, logger *utils.Logger) {
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		log.Fatalf("Error writing kubeconfig to file: %v\n", err)
 	}
-
-	logger.LogFile(content)
 }
