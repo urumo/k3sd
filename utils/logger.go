@@ -65,7 +65,7 @@ func (l *Logger) LogFile(format string, args ...interface{}) {
 //   - format: A string containing the format of the command log message (similar to fmt.Sprintf).
 //   - args: A variadic list of arguments to be formatted into the command log message.
 func (l *Logger) LogCmd(format string, args ...interface{}) {
-	l.Stdout <- fmt.Sprintf(format, args...)
+	l.Cmd <- fmt.Sprintf(format, args...)
 }
 
 // LogWorker continuously processes log messages from the Stdout channel
