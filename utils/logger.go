@@ -15,9 +15,10 @@ type Logger struct {
 	Id     string            // Identifier for the logger instance.
 }
 
+// FileWithInfo represents a file log message with its file name and content.
 type FileWithInfo struct {
-	FileName string
-	Content  string
+	FileName string // Name of the file being logged.
+	Content  string // Content of the file being logged.
 }
 
 // NewLogger initializes a new Logger instance with unique channels and an identifier.
@@ -58,13 +59,13 @@ func (l *Logger) LogErr(format string, args ...interface{}) {
 // LogFile formats a log message and sends it to the File channel.
 //
 // Parameters:
-//   - format: A string containing the format of the log message (similar to fmt.Sprintf).
-//   - args: A variadic list of arguments to be formatted into the log message.
+//   - filePath: A string representing the path of the file being logged.
+//   - content: A string containing the content of the file being logged.
 func (l *Logger) LogFile(filePath, content string) {
 	l.File <- FileWithInfo{FileName: filePath, Content: content}
 }
 
-// LogCmd formats a command log message and sends it to the Stdout channel.
+// LogCmd formats a command log message and sends it to the Cmd channel.
 //
 // Parameters:
 //   - format: A string containing the format of the command log message (similar to fmt.Sprintf).
