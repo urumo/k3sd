@@ -10,18 +10,19 @@ Linkerd.
 - Cross-platform support: Linux (x86_64/arm64), macOS (Apple Silicon), and Windows (x86_64)
 - Install and configure additional components:
     - cert-manager
-    - Traefik(HTTP/3 enabled)
+    - Traefik (HTTP/3 enabled)
     - Prometheus stack
     - Gitea
     - Linkerd (including multi-cluster)
 - Generate and manage kubeconfig files
 - Uninstall clusters cleanly
+- Display version information with `--version`
 
 ## Prerequisites
 
-- `kubectl` - Kubernetes CLI
-- `linkerd` - Linkerd CLI (required for Linkerd installations)
-- `step` - Certificate management tool (required for Linkerd)
+- `kubectl` - [Kubernetes CLI](https://kubernetes.io/docs/tasks/tools/)
+- `linkerd` - [Linkerd CLI](https://linkerd.io/2.18/getting-started/#step-1-install-the-cli) (required for Linkerd installations)
+- `step` - [Certificate management tool](https://smallstep.com/docs/step-cli/installation/) (required for Linkerd)
 - `ssh` - SSH client for remote server access
 
 ## Installation
@@ -63,6 +64,12 @@ Create a JSON configuration file for your clusters. Example:
 ```
 
 ## Usage
+
+### Display Version
+
+```bash
+k3sd --version
+```
 
 ### Create a Cluster
 
@@ -113,15 +120,18 @@ k3sd --config-path=/path/to/clusters.json --uninstall
 | `--linkerd`        | Install Linkerd                                       |
 | `--linkerd-mc`     | Install Linkerd with multi-cluster support            |
 | `--uninstall`      | Uninstall the cluster                                 |
+| `--version`        | Print the version and exit                            |
 
 ## Build from Source
 
 ```bash
 git clone https://github.com/urumo/k3sd.git
 cd k3sd
-go build -o k3sd ./cli/main.go
+go build -ldflags "-X 'github.com/urumo/k3sd/utils.Version=<version>'" -o k3sd ./cli/main.go
 ```
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+```
