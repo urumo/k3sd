@@ -133,5 +133,3 @@ go build -ldflags "-X 'github.com/urumo/k3sd/utils.Version=<version>'" -o k3sd .
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-```
