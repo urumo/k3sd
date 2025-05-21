@@ -15,6 +15,7 @@ func main() {
 	go logger.LogWorker()
 	go logger.LogWorkerErr()
 	go logger.LogWorkerFile()
+	go logger.LogWorkerCmd()
 
 	utils.ParseFlags()
 
