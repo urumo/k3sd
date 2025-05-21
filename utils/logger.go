@@ -80,7 +80,7 @@ func (l *Logger) LogCmd(format string, args ...interface{}) {
 // This function should be run as a goroutine to handle log messages asynchronously.
 func (l *Logger) LogWorker() {
 	for logMessage := range l.Stdout {
-		log.Println(fmt.Sprintf("[INFO] %s", logMessage))
+		log.Println(fmt.Sprintf("[stdout] %s", logMessage))
 	}
 }
 
@@ -90,7 +90,7 @@ func (l *Logger) LogWorker() {
 // This function should be run as a goroutine to handle error log messages asynchronously.
 func (l *Logger) LogWorkerErr() {
 	for logMessage := range l.Stderr {
-		log.Println(fmt.Sprintf("[ERROR] %s", logMessage))
+		log.Println(fmt.Sprintf("[stderr] %s", logMessage))
 	}
 }
 

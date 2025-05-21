@@ -5,8 +5,8 @@
     "password": "pass",
     "nodeName": "master",
     "labels": "label1=value1",
-    "done": false,
-    "domain": "example.com",
+    "done": false, // should be false by default, only the program should set it to true, which means that setup was a success
+    "domain": "example.com", // only needed if you are going to install cluster issuer and cert manager
     "workers": [
       {
         "address": "ip2",
