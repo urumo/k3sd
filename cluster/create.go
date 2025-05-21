@@ -6,6 +6,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 )
@@ -77,7 +78,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additionalCommands 
 
 			// Define commands to set up the worker node.
 			workerCmds := []string{
-				fmt.Sprintf("ssh %s@%s \"sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install curl wget -y\"", worker.User, worker.Address),
+				fmt.Sprintf("ssh %s@%s \"sudo apt-get update && sudo apt-get install curl -y\"", worker.User, worker.Address),
 				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(joinToken)),
 				fmt.Sprintf("kubectl label node %s %s --overwrite", worker.NodeName, worker.Labels),
 			}
@@ -100,7 +101,113 @@ func installLinkerdMC(cluster Cluster, client *ssh.Client, logger *utils.Logger)
 }
 
 func installLinkerd(cluster Cluster, client *ssh.Client, logger *utils.Logger) {
+	createRootCerts(logger)
+	checkLinkerdCmd(cluster, logger)
+	installLinkerdCRDS(cluster, logger)
+}
 
+func installLinkerdCRDS(cluster Cluster, logger *utils.Logger) {
+	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
+
+	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "install", "--crds", " | ", "kubectl", "apply", "-f", "-")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Stream stdout and stderr
+	go streamOutput(stdout, false, logger)
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	logger.Log("Command executed successfully")
+}
+
+func checkLinkerdCmd(cluster Cluster, logger *utils.Logger) {
+	kubeconfigPath := path.Join("./kubeconfigs", logger.Id, fmt.Sprintf("%s.yaml", cluster.NodeName))
+
+	cmd := exec.Command("linkerd", "--kubeconfig", kubeconfigPath, "check", "--pre")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Stream stdout and stderr
+	go streamOutput(stdout, false, logger)
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	logger.Log("Command executed successfully")
+}
+
+func createRootCerts(logger *utils.Logger) {
+	dir := path.Join("./kubeconfigs", logger.Id)
+
+	cmd := exec.Command("step", "certificate", "create",
+		"identity.linkerd.cluster.local",
+		dir+"/ca.crt",
+		dir+"/ca.key",
+		"--profile", "root-ca",
+		"--no-password",
+		"--insecure",
+		"--force",
+		"--not-after", "438000h",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatalf("Failed to get stderr pipe: %v", err)
+	}
+
+	// Start the command execution
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	// Stream stdout and stderr
+	go streamOutput(stdout, false, logger)
+	go streamOutput(stderr, true, logger)
+
+	// Wait for the command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Fatalf("Command execution failed: %v", err)
+	}
+
+	logger.Log("Command executed successfully")
 }
 
 // baseClusterCommands generates a list of base commands to set up a cluster.
@@ -177,13 +284,17 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 	}
 	kubeConfig = strings.Replace(kubeConfig, "127.0.0.1", cluster.Address, -1)
 
-	logger.LogFile(kubeConfig)
+	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, nodeName))
+	createFile(kubeConfigPath, kubeConfig, logger)
+}
 
-	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", nodeName, nodeName))
-	if err := os.MkdirAll(path.Dir(kubeConfigPath), os.ModePerm); err != nil {
+func createFile(filePath, content string, logger *utils.Logger) {
+	if err := os.MkdirAll(path.Dir(filePath), os.ModePerm); err != nil {
 		log.Fatalf("Error creating directory: %v\n", err)
 	}
-	if err := os.WriteFile(kubeConfigPath, []byte(kubeConfig), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		log.Fatalf("Error writing kubeconfig to file: %v\n", err)
 	}
+
+	logger.LogFile(content)
 }

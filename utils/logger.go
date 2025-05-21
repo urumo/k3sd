@@ -95,7 +95,7 @@ func (l *Logger) LogWorkerErr() {
 func (l *Logger) LogWorkerFile() {
 	delimiter := "----------------------------------------"
 	for logMessage := range l.File {
-		log.Println(fmt.Sprintf("[FILE] \n%s\n%s%s\n", delimiter, logMessage, delimiter))
+		log.Println(fmt.Sprintf("[FILE] \n%s\n%s\n%s\n", delimiter, logMessage, delimiter))
 	}
 }
 

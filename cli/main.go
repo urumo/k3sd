@@ -7,6 +7,7 @@ import (
 	"geet.svck.dev/urumo/k3sd/utils"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -16,6 +17,8 @@ func main() {
 	go logger.LogWorkerErr()
 	go logger.LogWorkerFile()
 	go logger.LogWorkerCmd()
+
+	checkCommandExists()
 
 	utils.ParseFlags()
 
@@ -42,5 +45,20 @@ func main() {
 
 	if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {
 		log.Fatalf("failed to save clusters: %v", err)
+	}
+}
+
+func checkCommandExists() {
+	commands := []string{
+		"linkerd",
+		"kubectl",
+		"step",
+		"ssh",
+	}
+
+	for _, cmd := range commands {
+		if _, err := exec.LookPath(cmd); err != nil {
+			log.Fatalf("Command %s not found. Please install it.", cmd)
+		}
 	}
 }
