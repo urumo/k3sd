@@ -31,12 +31,17 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 		if err != nil {
 			return nil, err
 		}
-		defer client.Close()
+		defer func(client *ssh.Client) {
+			err := client.Close()
+			if err != nil {
+
+			}
+		}(client)
 
 		if !cluster.Done {
 			// Prepare and execute commands for setting up the cluster.
 			cmds := append(baseClusterCommands(cluster), additional...)
-			appendOptionalApps(&cmds, cluster.Domain)
+			appendOptionalApps(&cmds, cluster.Domain, cluster.Gitea.Pg)
 			logger.Log("Connecting to cluster: %s", cluster.Address)
 			if err := ExecuteCommands(client, cmds, logger); err != nil {
 				return nil, fmt.Errorf("exec master: %v", err)
@@ -138,7 +143,7 @@ func runLinkerdInstall(cluster Cluster, logger *utils.Logger, multicluster bool)
 	dir := path.Join("./kubeconfigs", logger.Id)
 	kubeconfig := path.Join(dir, fmt.Sprintf("%s.yaml", cluster.NodeName))
 
-	createRootCerts(dir, cluster, logger)
+	createRootCerts(dir, logger)
 	installCRDs(kubeconfig, logger)
 	createIssuerCerts(dir, cluster, logger)
 	runLinkerdCmd("install", []string{
@@ -195,7 +200,7 @@ func installCRDs(kubeconfig string, logger *utils.Logger) {
 // - dir: The directory to store the certificates.
 // - cluster: The Cluster object representing the cluster.
 // - Logger: A pointer to a utils.Logger instance for logging operations.
-func createRootCerts(dir string, cluster Cluster, logger *utils.Logger) {
+func createRootCerts(dir string, logger *utils.Logger) {
 	cmd := exec.Command("step", "certificate", "create",
 		"identity.linkerd.cluster.local",
 		path.Join(dir, "ca.crt"),
@@ -295,7 +300,7 @@ func baseClusterCommands(cluster Cluster) []string {
 // Parameters:
 // - commands: A pointer to a slice of strings containing the commands.
 // - domain: The domain name for the cluster.
-func appendOptionalApps(commands *[]string, domain string) {
+func appendOptionalApps(commands *[]string, domain string, pg Pg) {
 	if utils.Flags["prometheus"] {
 		*commands = append(*commands,
 			"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
@@ -322,7 +327,7 @@ func appendOptionalApps(commands *[]string, domain string) {
 		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/clusterissuer.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
 	}
 	if utils.Flags["gitea"] {
-		*commands = append(*commands, "kubectl apply -f /tmp/yamls/gitea.yaml")
+		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.yaml | POSTGRES_USER=%s POSTGRES_PASSWORD=%s POSTGRES_DB=%s  envsubst | kubectl apply -f -", pg.Username, pg.Password, pg.DbName))
 		if utils.Flags["gitea-ingress"] {
 			*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.ingress.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
 		}
@@ -345,7 +350,7 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 	kubeConfig = strings.Replace(kubeConfig, "127.0.0.1", cluster.Address, -1)
 
 	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, nodeName))
-	createFile(kubeConfigPath, kubeConfig, logger)
+	createFile(kubeConfigPath, kubeConfig)
 }
 
 // createFile creates a file with the specified content.
@@ -354,7 +359,7 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 // - filePath: The path to the file to be created.
 // - content: The content to write to the file.
 // - Logger: A pointer to a utils.Logger instance for logging operations.
-func createFile(filePath, content string, logger *utils.Logger) {
+func createFile(filePath, content string) {
 	if err := os.MkdirAll(path.Dir(filePath), os.ModePerm); err != nil {
 		log.Fatalf("Error creating directory: %v\n", err)
 	}
