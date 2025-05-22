@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   determine-version:
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next_version.outputs.tag }}
