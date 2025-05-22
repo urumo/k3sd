@@ -1,0 +1,65 @@
+# /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: traefik-crd
+  namespace: kube-system
+spec:
+  chart: https://%{KUBERNETES_API}%/static/charts/traefik-crd-34.2.1+up34.2.0.tgz
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  chart: https://%{KUBERNETES_API}%/static/charts/traefik-34.2.1+up34.2.0.tgz
+  set:
+    global.systemDefaultRegistry: ""
+  valuesContent: |-
+    deployment:
+      podAnnotations:
+        prometheus.io/port: "8082"
+        prometheus.io/scrape: "true"
+    priorityClassName: "system-cluster-critical"
+    image:
+      repository: "rancher/mirrored-library-traefik"
+      tag: "3.3.6"
+    tolerations:
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+    service:
+      ipFamilyPolicy: "PreferDualStack"
+    ports:
+      web:
+        port: 80
+      websecure:
+        http3:
+          enabled: true
+          advertisedPort: 443
+      traefik:
+        port: 9000
+        expose: 
+          enabled: true
+          ingressClassName: "traefik"
+      gateway:
+        port: 8000
+        expose: 
+          enabled: true
+    ingressRoute:
+      dashboard:
+        enabled: true
+    providers:
+      kubernetesIngress:
+        enabled: true
+        publishedService:
+          enabled: true
+      kubernetesGateway:
+        enabled: true

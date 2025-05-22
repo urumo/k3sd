@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  labels:
+    app: gitea
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitea
+  template:
+    metadata:
+      name: gitea
+      labels:
+        app: gitea
+    spec:
+      nodeSelector:
+        entry: "false"
+        domain: "true"
+        support: "false"
+      volumes:
+        - name: gitea-pg-vol
+          persistentVolumeClaim:
+            claimName: gitea-pg-pvc
+        - name: gitea-vol
+          persistentVolumeClaim:
+            claimName: gitea-data-pvc
+        - name: timezone
+          hostPath:
+            path: /etc/timezone
+            type: File
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
+      containers:
+        - name: cache
+          image: eqalpha/keydb
+          imagePullPolicy: IfNotPresent
+          command: [ "keydb-server" ]
+        - name: pg
+          image: postgres:17-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: ${POSTGRES_USER}
+            - name: POSTGRES_PASSWORD
+              value: ${POSTGRES_PASSWORD}
+            - name: POSTGRES_DB
+              value: ${POSTGRES_DB}
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: gitea-pg-vol
+        - name: gitea
+          image: docker.gitea.com/gitea:1.23.7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: gitea
+              containerPort: 3000
+          env:
+            - name: GITEA__database__DB_TYPE
+              value: postgres
+            - name: GITEA__database__HOST
+              value: localhost:5432
+            - name: GITEA__database__USER
+              value: ${POSTGRES_USER}
+            - name: GITEA__database__PASSWD
+              value: ${POSTGRES_PASSWORD}
+            - name: GITEA__database__NAME
+              value: ${POSTGRES_DB}
+            - name: USER_UID
+              value: "1000"
+            - name: USER_GID
+              value: "1000"
+          volumeMounts:
+            - name: gitea-vol
+              mountPath: /data
+            - name: timezone
+              mountPath: /etc/timezone
+            - name: localtime
+              mountPath: /etc/localtime
+      restartPolicy: Always
+---
+# service
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+  labels:
+    app: gitea
+spec:
+  type: ClusterIP
+  ports:
+    - name: gitea
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+  selector:
+    app: gitea
