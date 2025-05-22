@@ -282,8 +282,8 @@ func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
 		"sudo apt-get install curl wget zip unzip -y",
-		"cd /tmp && wget https://github.com/urumo/k3sd_yamls/archive/refs/tags/v0.0.2.zip",
-		"unzip -o /tmp/v0.0.2.zip -d /tmp",
+		"cd /tmp && curl -L -o source.zip $(curl -s https://api.github.com/repos/urumo/k3sd/releases/latest | grep \"zipball_url\" | cut -d '\"' -f 4)",
+		"unzip -o -j /tmp/source.zip -d /tmp/yamls",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
 		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.Labels),
@@ -302,7 +302,7 @@ func appendOptionalApps(commands *[]string, domain string) {
 			"helm version",
 			"helm repo add prometheus-community https://prometheus-community.github.io/helm-charts",
 			"helm repo update prometheus-community",
-			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/k3sd_yamls-0.0.2/prom-stack-values.yaml",
+			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/yamls/prom-stack-values.yaml",
 		)
 	}
 	if utils.Flags["cert-manager"] {
@@ -314,17 +314,17 @@ func appendOptionalApps(commands *[]string, domain string) {
 	}
 	if utils.Flags["traefik-values"] {
 		*commands = append(*commands,
-			"kubectl apply -f /tmp/k3sd_yamls-0.0.2/traefik-values.yaml",
+			"kubectl apply -f /tmp/yamls/traefik-values.yaml",
 			"while ! kubectl get deploy -n kube-system | grep -q traefik; do sleep 5; done; while [ $(kubectl get deploy -n kube-system | grep traefik | awk '{print $2}') != \"1/1\" ]; do sleep 5; done",
 		)
 	}
 	if utils.Flags["clusterissuer"] {
-		*commands = append(*commands, fmt.Sprintf("cat /tmp/k3sd_yamls-0.0.2/clusterissuer.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
+		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/clusterissuer.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
 	}
 	if utils.Flags["gitea"] {
-		*commands = append(*commands, "kubectl apply -f /tmp/k3sd_yamls-0.0.2/gitea.yaml")
+		*commands = append(*commands, "kubectl apply -f /tmp/yamls/gitea.yaml")
 		if utils.Flags["gitea-ingress"] {
-			*commands = append(*commands, fmt.Sprintf("cat /tmp/k3sd_yamls-0.0.2/gitea.ingress.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
+			*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.ingress.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
 		}
 	}
 }
