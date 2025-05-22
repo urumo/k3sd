@@ -7,6 +7,13 @@
     "labels": "label1=value1",
     "done": false, // should be false by default, only the program should set it to true, which means that setup was a success
     "domain": "example.com", // only needed if you are going to install cluster issuer and cert manager
+    "gitea": {
+      "pg": {
+        "user": "user",
+        "password": "passwoed",
+        "db": "dbname"
+      }
+    },
     "workers": [
       {
         "address": "ip2",

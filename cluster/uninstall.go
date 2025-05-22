@@ -34,19 +34,23 @@ func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, erro
 
 		// Uninstall K3s agent from each worker node in the cluster.
 		for wi, worker := range cluster.Workers {
-			if err := ExecuteCommands(client, []string{
-				fmt.Sprintf("ssh %s@%s \"k3s-agent-uninstall.sh\"", worker.User, worker.Address),
-			}, logger); err != nil {
-				logger.Log("Error uninstalling worker on %s: %v\n", cluster.Address, err)
+			if worker.Done {
+				if err := ExecuteCommands(client, []string{
+					fmt.Sprintf("ssh %s@%s \"k3s-agent-uninstall.sh\"", worker.User, worker.Address),
+				}, logger); err != nil {
+					logger.Log("Error uninstalling worker on %s: %v\n", cluster.Address, err)
+				}
+				clusters[ci].Workers[wi].Done = false
 			}
-			clusters[ci].Workers[wi].Done = false
 		}
 
-		// Uninstall K3s from the master node.
-		if err := ExecuteCommands(client, []string{"k3s-uninstall.sh"}, logger); err != nil {
-			logger.Log("Error uninstalling master on %s: %v\n", cluster.Address, err)
+		if cluster.Done {
+			// Uninstall K3s from the master node.
+			if err := ExecuteCommands(client, []string{"k3s-uninstall.sh"}, logger); err != nil {
+				logger.Log("Error uninstalling master on %s: %v\n", cluster.Address, err)
+			}
+			clusters[ci].Done = false
 		}
-		clusters[ci].Done = false
 	}
 
 	return clusters, nil
