@@ -23,8 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next_version.outputs.tag }}
+      current_tag: ${{ steps.current_tag.outputs.previous_tag }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get Current Tag
+        id: current_tag
+        run: |
+          current_tag=$(git describe --tags --exact-match || echo "none")
+          echo "Current tag: $current_tag"
+          echo "current_tag=$current_tag" >> $GITHUB_ENV
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine next version
         id: next_version
@@ -97,7 +107,7 @@ jobs:
           file k3sd${{ matrix.extension }}
           chmod +x k3sd${{ matrix.extension }}
           tar -czvf k3sd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz k3sd${{ matrix.extension }}
-      
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -122,6 +132,8 @@ jobs:
           tag_name: ${{ needs.determine-version.outputs.tag }}
           release_name: Release ${{ needs.determine-version.outputs.tag }}
           draft: false
+          body: |
+            **Full Changelog**: https://github.com/urumo/k3sd/compare/${{ needs.determine-version.outputs.current_tag }}...${{ needs.determine-version.outputs.tag }}
           prerelease: false
 
       - name: Upload Linux AMD64 Release Asset
