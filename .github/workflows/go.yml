@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next_version.outputs.tag }}
-      current_tag: ${{ steps.current_tag.outputs.previous_tag }}
+      current_tag: ${{ steps.current_tag.outputs.current_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
