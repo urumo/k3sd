@@ -15,10 +15,6 @@ spec:
       labels:
         app: gitea
     spec:
-      nodeSelector:
-        entry: "false"
-        domain: "true"
-        support: "false"
       volumes:
         - name: gitea-pg-vol
           persistentVolumeClaim:
