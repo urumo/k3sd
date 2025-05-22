@@ -1,7 +1,7 @@
 # K3SD - K3s Cluster Deployment Tool
 
 K3SD is a command-line tool for creating, managing, and uninstalling K3s Kubernetes clusters across multiple machines.
-It automates the deployment of K3s clusters with optional components like cert-manager, Traefik, Prometheus, and
+It automates the deployment of K3s clusters with optional components like cert-manager, Traefik, Prometheus, Gitea, and
 Linkerd.
 
 ## Features
@@ -12,7 +12,7 @@ Linkerd.
     - cert-manager
     - Traefik (HTTP/3 enabled)
     - Prometheus stack
-    - Gitea
+    - Gitea (with PostgreSQL support)
     - Linkerd (including multi-cluster)
 - Generate and manage kubeconfig files
 - Uninstall clusters cleanly
@@ -49,7 +49,14 @@ Create a JSON configuration file for your clusters. Example:
     "password": "password",
     "nodeName": "master-1",
     "labels": "node-role.kubernetes.io/control-plane=true",
-    "domain": "example.com",
+    "domain": "example.com", // required for -cluster-issuer and -gitea-ingress
+    "gitea": { // only needed if the --gitea option is used
+      "pg": {
+        "user": "gitea", // PostgreSQL user
+        "password": "gitea_password", // PostgreSQL password
+        "db": "gitea_db" // PostgreSQL database name
+      }
+    },
     "workers": [
       {
         "address": "192.168.1.11",
@@ -114,7 +121,7 @@ k3sd --config-path=/path/to/clusters.json --uninstall
 | `--cert-manager`   | Install cert-manager                                  |
 | `--traefik`        | Install Traefik                                       |
 | `--cluster-issuer` | Apply Cluster Issuer YAML (requires domain in config) |
-| `--gitea`          | Install Gitea                                         |
+| `--gitea`          | Install Gitea (requires PostgreSQL configuration)     |
 | `--gitea-ingress`  | Apply Gitea Ingress (requires domain in config)       |
 | `--prometheus`     | Install Prometheus stack                              |
 | `--linkerd`        | Install Linkerd                                       |
