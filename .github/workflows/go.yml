@@ -30,7 +30,7 @@ jobs:
       - name: Get Current Tag
         id: current_tag
         run: |
-          current_tag=$(git describe --tags --exact-match || echo "none")
+          current_tag=$(git tag --points-at HEAD | head -n 1 || echo "none")
           echo "Current tag: $current_tag"
           echo "current_tag=$current_tag" >> $GITHUB_ENV
         env:
