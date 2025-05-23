@@ -21,17 +21,18 @@ Linkerd.
 ## Prerequisites
 
 - `kubectl` - [Kubernetes CLI](https://kubernetes.io/docs/tasks/tools/)
-- `linkerd` - [Linkerd CLI](https://linkerd.io/2.18/getting-started/#step-1-install-the-cli) (required for Linkerd installations)
+- `linkerd` - [Linkerd CLI](https://linkerd.io/2.18/getting-started/#step-1-install-the-cli) (required for Linkerd
+  installations)
 - `step` - [Certificate management tool](https://smallstep.com/docs/step-cli/installation/) (required for Linkerd)
 - `ssh` - SSH client for remote server access
 
 ## Installation
 
-Download the appropriate binary for your platform from the [Releases](https://github.com/urumo/k3sd/releases) page.
+Download the appropriate binary for your platform from the [Releases](https://github.com/argon-chat/k3sd/releases) page.
 
 ```bash
 # Example for Linux x86_64
-curl -LO https://github.com/urumo/k3sd/releases/latest/download/k3sd-linux-amd64.tar.gz
+curl -LO https://github.com/argon-chat/k3sd/releases/latest/download/k3sd-linux-amd64.tar.gz
 tar -xzf k3sd-linux-amd64.tar.gz
 chmod +x k3sd
 sudo mv k3sd /usr/local/bin/
@@ -41,32 +42,32 @@ sudo mv k3sd /usr/local/bin/
 
 Create a JSON configuration file for your clusters. Example:
 
-```json
+```js
 [
-  {
-    "address": "192.168.1.10",
-    "user": "root",
-    "password": "password",
-    "nodeName": "master-1",
-    "labels": "node-role.kubernetes.io/control-plane=true",
-    "domain": "example.com", // required for -cluster-issuer and -gitea-ingress
-    "gitea": { // only needed if the --gitea option is used
-      "pg": {
-        "user": "gitea", // PostgreSQL user
-        "password": "gitea_password", // PostgreSQL password
-        "db": "gitea_db" // PostgreSQL database name
-      }
-    },
-    "workers": [
-      {
-        "address": "192.168.1.11",
+    {
+        "address": "192.168.1.10",
         "user": "root",
         "password": "password",
-        "nodeName": "worker-1",
-        "labels": "node-role.kubernetes.io/worker=true"
-      }
-    ]
-  }
+        "nodeName": "master-1",
+        "labels": "node-role.kubernetes.io/control-plane=true",
+        "domain": "example.com", // required for -cluster-issuer and -gitea-ingress
+        "gitea": { // only needed if the --gitea option is used
+            "pg": {
+                "user": "gitea", // PostgreSQL user
+                "password": "gitea_password", // PostgreSQL password
+                "db": "gitea_db" // PostgreSQL database name
+            }
+        },
+        "workers": [
+            {
+                "address": "192.168.1.11",
+                "user": "root",
+                "password": "password",
+                "nodeName": "worker-1",
+                "labels": "node-role.kubernetes.io/worker=true"
+            }
+        ]
+    }
 ]
 ```
 
@@ -132,9 +133,9 @@ k3sd --config-path=/path/to/clusters.json --uninstall
 ## Build from Source
 
 ```bash
-git clone https://github.com/urumo/k3sd.git
+git clone https://github.com/argon-chat/k3sd.git
 cd k3sd
-go build -ldflags "-X 'github.com/urumo/k3sd/utils.Version=<version>'" -o k3sd ./cli/main.go
+go build -ldflags "-X 'github.com/argon-chat/k3sd/utils.Version=<version>'" -o k3sd ./cli/main.go
 ```
 
 ## Contributing
