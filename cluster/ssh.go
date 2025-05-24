@@ -74,7 +74,7 @@ func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 	}
 	defer func(session *ssh.Session) {
 		err := session.Close()
-		if err != nil {
+		if err != nil && err.Error() != "EOF" {
 			logger.LogErr("Error closing SSH session: %v\n", err)
 		}
 	}(session)
@@ -106,7 +106,7 @@ func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger
 	}
 	defer func(session *ssh.Session) {
 		err := session.Close()
-		if err != nil {
+		if err != nil && err.Error() != "EOF" {
 			logger.LogErr("Error closing SSH session: %v\n", err)
 		}
 	}(session)
