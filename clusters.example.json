@@ -4,7 +4,6 @@
     "user": "ubuntu",
     "password": "password123",
     "nodeName": "master",
-    "context": "context",
     "labels": {
       "label1": "value1",
       "label2": "value2"
