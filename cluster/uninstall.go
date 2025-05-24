@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+
 	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 )
@@ -16,17 +17,8 @@ import (
 //   - Error: An error if any step in the uninstallation process fails.
 func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, error) {
 	for ci, cluster := range clusters {
-		// Configure SSH client for connecting to the cluster.
-		config := &ssh.ClientConfig{
-			User: cluster.User,
-			Auth: []ssh.AuthMethod{
-				ssh.Password(cluster.Password),
-			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		}
-
-		// Establish an SSH connection to the cluster.
-		client, err := ssh.Dial("tcp", cluster.Address+":22", config)
+		// Use shared sshConnect for connecting to the cluster.
+		client, err := sshConnect(cluster.User, cluster.Password, cluster.Address)
 		if err != nil {
 			return nil, fmt.Errorf("Error connecting to cluster %s: %v\n", cluster.Address, err)
 		}
