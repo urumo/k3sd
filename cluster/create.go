@@ -6,12 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path"
 	"strings"
+	"time"
+
+	"gopkg.in/yaml.v2"
+	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/repo"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/discovery"
@@ -20,6 +29,7 @@ import (
 	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	yamlserializer "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
@@ -29,6 +39,95 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// installHelmChart installs or upgrades a Helm chart using the Go SDK, given repo, chart, version, and optional values file.
+func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile string, logger *utils.Logger) error {
+	// Ensure namespace exists before installing the chart
+	if namespace != "" && namespace != "default" {
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to build kubeconfig for namespace creation: %w", err)
+		}
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create k8s client for namespace creation: %w", err)
+		}
+		_, err = clientset.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				_, err = clientset.CoreV1().Namespaces().Create(context.TODO(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
+				if err != nil {
+					return fmt.Errorf("failed to create namespace %s: %w", namespace, err)
+				}
+				logger.Log("Created namespace %s", namespace)
+			} else {
+				return fmt.Errorf("failed to check namespace %s: %w", namespace, err)
+			}
+		}
+	}
+	settings := cli.New()
+	actionConfig := new(action.Configuration)
+	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), logger.Log); err != nil {
+		return fmt.Errorf("failed to init helm action config: %w", err)
+	}
+
+	install := action.NewUpgrade(actionConfig)
+	install.Namespace = namespace
+	install.Install = true
+	// install.CreateNamespace = true // Not available on Upgrade action
+	install.Atomic = true
+	install.Wait = true
+	install.Timeout = 300 // seconds
+
+	// Add repo if needed
+	repoEntry := &repo.Entry{
+		Name: repoName,
+		URL:  repoURL,
+	}
+	// Use only helm.sh/helm/v3/pkg/getter and pass settings as environment.EnvSettings
+	// getter.All expects environment.EnvSettings, which is an interface implemented by *cli.EnvSettings
+	providers := getter.All(settings)
+	r, err := repo.NewChartRepository(repoEntry, providers)
+	if err != nil {
+		return fmt.Errorf("failed to create chart repo: %w", err)
+	}
+	_, err = r.DownloadIndexFile()
+	if err != nil {
+		return fmt.Errorf("failed to download repo index: %w", err)
+	}
+
+	// Load values
+	vals := map[string]interface{}{}
+	if valuesFile != "" {
+		valuesBytes, err := ioutil.ReadFile(valuesFile)
+		if err != nil {
+			return fmt.Errorf("failed to read values file: %w", err)
+		}
+		if err := yaml.Unmarshal(valuesBytes, &vals); err != nil {
+			return fmt.Errorf("failed to unmarshal values: %w", err)
+		}
+	}
+
+	// Pull chart
+	fullChart := fmt.Sprintf("%s/%s", repoName, chartName)
+	install.ChartPathOptions.Version = chartVersion
+	cp, err := install.ChartPathOptions.LocateChart(fullChart, settings)
+	if err != nil {
+		return fmt.Errorf("failed to locate chart: %w", err)
+	}
+	chart, err := loader.Load(cp)
+	if err != nil {
+		return fmt.Errorf("failed to load chart: %w", err)
+	}
+
+	// Run upgrade/install
+	_, err = install.Run(releaseName, chart, vals)
+	if err != nil {
+		return fmt.Errorf("failed to install/upgrade chart: %w", err)
+	}
+	logger.Log("Helm chart %s/%s installed/upgraded successfully.", repoName, chartName)
+	return nil
+}
 
 // applyYAMLManifest applies a YAML manifest (from URL or file) using client-go dynamic client
 func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.Logger, substitutions map[string]string) error {
@@ -58,8 +157,16 @@ func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.L
 		}
 		data = []byte(content)
 	}
-	// Split multi-doc YAML
-	docs := strings.Split(string(data), "---")
+	// Split multi-doc YAML, robustly handle document boundaries
+	var docs []string
+	rawDocs := strings.Split(string(data), "\n---")
+	for _, doc := range rawDocs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" || strings.HasPrefix(doc, "#") {
+			continue
+		}
+		docs = append(docs, doc)
+	}
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -75,14 +182,10 @@ func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.L
 	}
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(disco))
 	for _, doc := range docs {
-		doc = strings.TrimSpace(doc)
-		if doc == "" {
-			continue
-		}
 		obj := &unstructured.Unstructured{}
 		_, _, err := decUnstructured.Decode([]byte(doc), nil, obj)
 		if err != nil {
-			logger.Log("YAML decode error: %v", err)
+			logger.Log("YAML decode error: %v\n---\n%s", err, doc)
 			continue
 		}
 		m := obj.GroupVersionKind()
@@ -183,18 +286,21 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			// Step 3: Apply optional apps using client-go (after kubeconfig is saved)
 			if utils.Flags["cert-manager"] {
 				logger.Log("Applying cert-manager CRDs and deployment...")
-				err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
-				if err != nil {
-					logger.Log("cert-manager CRDs error: %v", err)
-				}
-				err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
+
+				err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
 				if err != nil {
 					logger.Log("cert-manager error: %v", err)
 				}
+				err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
+				if err != nil {
+					logger.Log("cert-manager CRDs error: %v", err)
+				}
+				logger.Log("Waiting for cert-manager deployment to be ready...")
+				time.Sleep(30 * time.Second)
 			}
 			if utils.Flags["traefik-values"] {
 				logger.Log("Applying traefik values...")
-				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/traefik-values.yaml", logger, nil)
+				err := applyYAMLManifest(kubeconfigPath, "yamls/traefik-values.yaml", logger, nil)
 				if err != nil {
 					logger.Log("traefik-values error: %v", err)
 				}
@@ -203,7 +309,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			if utils.Flags["clusterissuer"] {
 				logger.Log("Applying clusterissuer...")
 				substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/clusterissuer.yaml", logger, substitutions)
+				err := applyYAMLManifest(kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
 				if err != nil {
 					logger.Log("clusterissuer error: %v", err)
 				}
@@ -215,17 +321,34 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 					"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
 					"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
 				}
-				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/gitea.yaml", logger, substitutions)
+				err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
 				if err != nil {
 					logger.Log("gitea error: %v", err)
 				}
 				if utils.Flags["gitea-ingress"] {
 					logger.Log("Applying gitea ingress...")
 					substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-					err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/gitea.ingress.yaml", logger, substitutions)
+					err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
 					if err != nil {
 						logger.Log("gitea-ingress error: %v", err)
 					}
+				}
+			}
+			if utils.Flags["prometheus"] {
+				logger.Log("Installing Prometheus stack via Helm Go SDK...")
+				err := installHelmChart(
+					kubeconfigPath,
+					"kube-prom-stack",
+					"monitoring",
+					"prometheus-community",
+					"https://prometheus-community.github.io/helm-charts",
+					"kube-prometheus-stack",
+					"35.5.1",
+					"yamls/prom-stack-values.yaml",
+					logger,
+				)
+				if err != nil {
+					logger.Log("Prometheus stack error: %v", err)
 				}
 			}
 
@@ -253,13 +376,30 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 				continue
 			}
 
-			// Commands to join the worker node to the cluster.
-			joinCmds := []string{
-				fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
-				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token), worker.NodeName),
-			}
-			if err := ExecuteCommands(client, joinCmds, logger); err != nil {
-				return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
+			if cluster.PrivateNet {
+				// SSH from master to worker (current logic)
+				joinCmds := []string{
+					fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
+					fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token), worker.NodeName),
+				}
+				if err := ExecuteCommands(client, joinCmds, logger); err != nil {
+					return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
+				}
+			} else {
+				// SSH from management host to worker directly
+				workerClient, err := sshConnect(worker.User, worker.Password, worker.Address)
+				if err != nil {
+					logger.Log("Failed to connect to worker %s directly: %v", worker.Address, err)
+					continue
+				}
+				defer workerClient.Close()
+				joinCmds := []string{
+					"sudo apt update && sudo apt install -y curl",
+					fmt.Sprintf("curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -", cluster.Address, strings.TrimSpace(token), worker.NodeName),
+				}
+				if err := ExecuteCommands(workerClient, joinCmds, logger); err != nil {
+					return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
+				}
 			}
 
 			// Use client-go to label the worker node
@@ -482,24 +622,6 @@ func baseClusterCommands(cluster Cluster) []string {
 		"sleep 10",
 		// Node labeling for master will be handled by client-go after kubeconfig is saved
 	}
-}
-
-// appendOptionalApps appends optional application installation commands to the provided command list.
-//
-// Parameters:
-// - commands: A pointer to a slice of strings containing the commands.
-// - domain: The domain name for the cluster.
-func appendOptionalApps(commands *[]string, domain string, pg Pg) {
-	if utils.Flags["prometheus"] {
-		*commands = append(*commands,
-			"curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash",
-			"helm version",
-			"helm repo add prometheus-community https://prometheus-community.github.io/helm-charts",
-			"helm repo update prometheus-community",
-			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/yamls/prom-stack-values.yaml",
-		)
-	}
-	// All kubectl apply logic is now handled by client-go in the main cluster creation flow
 }
 
 // saveKubeConfig retrieves and saves the kubeconfig file for the cluster.
