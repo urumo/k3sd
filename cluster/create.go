@@ -2,10 +2,13 @@ package cluster
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -13,9 +16,109 @@ import (
 	"path/filepath"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/discovery"
+	memory "k8s.io/client-go/discovery/cached/memory"
+
 	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	yamlserializer "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+// applyYAMLManifest applies a YAML manifest (from URL or file) using client-go dynamic client
+func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.Logger, substitutions map[string]string) error {
+	var data []byte
+	var err error
+	if strings.HasPrefix(manifestPathOrURL, "http://") || strings.HasPrefix(manifestPathOrURL, "https://") {
+		resp, err := http.Get(manifestPathOrURL)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+	} else {
+		data, err = ioutil.ReadFile(manifestPathOrURL)
+		if err != nil {
+			return err
+		}
+	}
+	// Substitute variables if needed
+	if substitutions != nil {
+		content := string(data)
+		for k, v := range substitutions {
+			content = strings.ReplaceAll(content, k, v)
+		}
+		data = []byte(content)
+	}
+	// Split multi-doc YAML
+	docs := strings.Split(string(data), "---")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return err
+	}
+	dyn, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+	decUnstructured := yamlserializer.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	disco, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return err
+	}
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(disco))
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		obj := &unstructured.Unstructured{}
+		_, _, err := decUnstructured.Decode([]byte(doc), nil, obj)
+		if err != nil {
+			logger.Log("YAML decode error: %v", err)
+			continue
+		}
+		m := obj.GroupVersionKind()
+		mapping, err := mapper.RESTMapping(m.GroupKind(), m.Version)
+		if err != nil {
+			logger.Log("RESTMapping error: %v", err)
+			continue
+		}
+		ns := obj.GetNamespace()
+		if ns == "" {
+			ns = "default"
+		}
+		resource := dyn.Resource(mapping.Resource).Namespace(ns)
+		_, err = resource.Create(context.TODO(), obj, metav1.CreateOptions{})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			logger.Log("Apply error: %v", err)
+		}
+	}
+	return nil
+}
+
+// getKubeClient loads a kubeconfig file and returns a Kubernetes clientset
+func getKubeClient(kubeconfigPath string) (*kubernetes.Clientset, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return clientset, nil
+}
 
 // CreateCluster sets up a Kubernetes cluster and its workers, installs optional applications,
 // and configures Linkerd if specified.
@@ -55,13 +158,67 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			// Step 2: Save kubeconfig to disk.
 			saveKubeConfig(client, cluster, cl.NodeName, logger)
 
-			// Step 3: Run all optional app setup commands (after kubeconfig is saved).
-			var appCmds []string
-			appendOptionalApps(&appCmds, cluster.Domain, cluster.Gitea.Pg)
-			if len(appCmds) > 0 {
-				logger.Log("Running optional app setup on cluster: %s", cluster.Address)
-				if err := ExecuteCommands(client, appCmds, logger); err != nil {
-					return nil, fmt.Errorf("optional app setup failed: %v", err)
+			// Step 2.5: Label the master node using client-go
+			kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cl.NodeName))
+			clientset, err := getKubeClient(kubeconfigPath)
+			if err != nil {
+				logger.Log("Failed to create k8s client for master: %v", err)
+			} else {
+				patch := fmt.Sprintf(`{"metadata":{"labels":{%s}}}`, cluster.GetLabels())
+				_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+				if err != nil {
+					logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
+				} else {
+					logger.Log("Labeled master node %s", cluster.NodeName)
+				}
+			}
+
+			// Step 3: Apply optional apps using client-go (after kubeconfig is saved)
+			if utils.Flags["cert-manager"] {
+				logger.Log("Applying cert-manager CRDs and deployment...")
+				err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
+				if err != nil {
+					logger.Log("cert-manager CRDs error: %v", err)
+				}
+				err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
+				if err != nil {
+					logger.Log("cert-manager error: %v", err)
+				}
+			}
+			if utils.Flags["traefik-values"] {
+				logger.Log("Applying traefik values...")
+				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/traefik-values.yaml", logger, nil)
+				if err != nil {
+					logger.Log("traefik-values error: %v", err)
+				}
+				// TODO: Add wait logic for traefik deployment readiness using client-go if needed
+			}
+			if utils.Flags["clusterissuer"] {
+				logger.Log("Applying clusterissuer...")
+				substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/clusterissuer.yaml", logger, substitutions)
+				if err != nil {
+					logger.Log("clusterissuer error: %v", err)
+				}
+			}
+			if utils.Flags["gitea"] {
+				logger.Log("Applying gitea...")
+				substitutions := map[string]string{
+					"${POSTGRES_USER}":     cluster.Gitea.Pg.Username,
+					"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
+					"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
+				}
+				err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/gitea.yaml", logger, substitutions)
+				if err != nil {
+					logger.Log("gitea error: %v", err)
+				}
+				if utils.Flags["gitea-ingress"] {
+					logger.Log("Applying gitea ingress...")
+					substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+					err := applyYAMLManifest(kubeconfigPath, "/tmp/yamls/gitea.ingress.yaml", logger, substitutions)
+					if err != nil {
+						logger.Log("gitea-ingress error: %v", err)
+					}
 				}
 			}
 
@@ -93,10 +250,24 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			joinCmds := []string{
 				fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
 				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token)),
-				fmt.Sprintf("kubectl label node %s %s --overwrite", worker.NodeName, worker.GetLabels()),
 			}
 			if err := ExecuteCommands(client, joinCmds, logger); err != nil {
 				return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
+			}
+
+			// Use client-go to label the worker node
+			kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cluster.NodeName))
+			clientset, err := getKubeClient(kubeconfigPath)
+			if err != nil {
+				logger.Log("Failed to create k8s client: %v", err)
+				continue
+			}
+			patch := fmt.Sprintf(`{"metadata":{"labels":{%s}}}`, worker.GetLabels())
+			_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+			if err != nil {
+				logger.Log("Failed to label node %s: %v", worker.NodeName, err)
+			} else {
+				logger.Log("Labeled worker node %s", worker.NodeName)
 			}
 		}
 
@@ -350,7 +521,7 @@ func baseClusterCommands(cluster Cluster) []string {
 		"unzip -o -j /tmp/source.zip -d /tmp/yamls",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
-		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.GetLabels()),
+		// Node labeling for master will be handled by client-go after kubeconfig is saved
 	}
 }
 
@@ -369,28 +540,7 @@ func appendOptionalApps(commands *[]string, domain string, pg Pg) {
 			"KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack --version \"35.5.1\" --namespace monitoring --create-namespace -f /tmp/yamls/prom-stack-values.yaml",
 		)
 	}
-	if utils.Flags["cert-manager"] {
-		*commands = append(*commands,
-			"kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml",
-			"kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml",
-			"sleep 30",
-		)
-	}
-	if utils.Flags["traefik-values"] {
-		*commands = append(*commands,
-			"kubectl apply -f /tmp/yamls/traefik-values.yaml",
-			"while ! kubectl get deploy -n kube-system | grep -q traefik; do sleep 5; done; while [ $(kubectl get deploy -n kube-system | grep traefik | awk '{print $2}') != \"1/1\" ]; do sleep 5; done",
-		)
-	}
-	if utils.Flags["clusterissuer"] {
-		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/clusterissuer.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
-	}
-	if utils.Flags["gitea"] {
-		*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.yaml | POSTGRES_USER=%s POSTGRES_PASSWORD=%s POSTGRES_DB=%s  envsubst | kubectl apply -f -", pg.Username, pg.Password, pg.DbName))
-		if utils.Flags["gitea-ingress"] {
-			*commands = append(*commands, fmt.Sprintf("cat /tmp/yamls/gitea.ingress.yaml | DOMAIN=%s envsubst | kubectl apply -f -", domain))
-		}
-	}
+	// All kubectl apply logic is now handled by client-go in the main cluster creation flow
 }
 
 // saveKubeConfig retrieves and saves the kubeconfig file for the cluster.
