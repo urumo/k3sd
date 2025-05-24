@@ -3,17 +3,14 @@ package cluster
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/user"
 	"path"
-	"path/filepath"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,7 +45,7 @@ func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.L
 			return err
 		}
 	} else {
-		data, err = ioutil.ReadFile(manifestPathOrURL)
+		data, err = os.ReadFile(manifestPathOrURL)
 		if err != nil {
 			return err
 		}
@@ -164,8 +161,18 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			if err != nil {
 				logger.Log("Failed to create k8s client for master: %v", err)
 			} else {
-				patch := fmt.Sprintf(`{"metadata":{"labels":{%s}}}`, cluster.GetLabels())
-				_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+				labelBytes, err := json.Marshal(cluster.Labels)
+				if err != nil {
+					logger.Log("Failed to marshal master node labels: %v", err)
+				} else {
+					patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
+					_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+					if err != nil {
+						logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
+					} else {
+						logger.Log("Labeled master node %s", cluster.NodeName)
+					}
+				}
 				if err != nil {
 					logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
 				} else {
@@ -249,7 +256,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			// Commands to join the worker node to the cluster.
 			joinCmds := []string{
 				fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
-				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token)),
+				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token), worker.NodeName),
 			}
 			if err := ExecuteCommands(client, joinCmds, logger); err != nil {
 				return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
@@ -262,12 +269,17 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 				logger.Log("Failed to create k8s client: %v", err)
 				continue
 			}
-			patch := fmt.Sprintf(`{"metadata":{"labels":{%s}}}`, worker.GetLabels())
-			_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+			labelBytes, err := json.Marshal(worker.Labels)
 			if err != nil {
-				logger.Log("Failed to label node %s: %v", worker.NodeName, err)
+				logger.Log("Failed to marshal worker node labels: %v", err)
 			} else {
-				logger.Log("Labeled worker node %s", worker.NodeName)
+				patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
+				_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+				if err != nil {
+					logger.Log("Failed to label node %s: %v", worker.NodeName, err)
+				} else {
+					logger.Log("Labeled worker node %s", worker.NodeName)
+				}
 			}
 		}
 
@@ -287,58 +299,6 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 // Returns:
 // - A pointer to an ssh.Client instance.
 // - An error if the connection fails.
-func sshConnect(userName, password, host string) (*ssh.Client, error) {
-	var authMethods []ssh.AuthMethod
-
-	usr, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("could not get current user: %w", err)
-	}
-	sshDir := filepath.Join(usr.HomeDir, ".ssh")
-
-	err = filepath.WalkDir(sshDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-
-		if strings.HasSuffix(d.Name(), ".pub") {
-			return nil
-		}
-
-		if _, err := os.Stat(path + ".pub"); err == nil {
-			keyBytes, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			signer, err := ssh.ParsePrivateKey(keyBytes)
-			if err != nil {
-				return nil
-			}
-			authMethods = append(authMethods, ssh.PublicKeys(signer))
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed loading SSH keys: %w", err)
-	}
-
-	if password != "" {
-		authMethods = append(authMethods, ssh.Password(password))
-	}
-
-	if len(authMethods) == 0 {
-		return nil, fmt.Errorf("no usable SSH authentication methods found")
-	}
-
-	cfg := &ssh.ClientConfig{
-		User:            userName,
-		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	return ssh.Dial("tcp", host+":22", cfg)
-}
 
 // logFiles reads and logs the contents of kubeconfig files for the cluster.
 //
@@ -517,9 +477,8 @@ func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
 		"sudo apt-get install curl wget zip unzip -y",
-		fmt.Sprintf("cd /tmp && curl -L -o source.zip $(curl -s https://api.github.com/repos/argon-chat/k3sd/releases/tags/%s | grep \"zipball_url\" | cut -d '\"' -f 4)", utils.Version),
-		"unzip -o -j /tmp/source.zip -d /tmp/yamls",
-		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
+		// No longer need to download or unzip source.zip for yamls
+		fmt.Sprintf("curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable traefik --node-name %s' K3S_KUBECONFIG_MODE=\"644\" sh -", cluster.NodeName),
 		"sleep 10",
 		// Node labeling for master will be handled by client-go after kubeconfig is saved
 	}
@@ -558,8 +517,52 @@ func saveKubeConfig(client *ssh.Client, cluster Cluster, nodeName string, logger
 	}
 	kubeConfig = strings.Replace(kubeConfig, "127.0.0.1", cluster.Address, -1)
 
+	// Use client-go to parse and update kubeconfig
+	config, err := clientcmd.Load([]byte(kubeConfig))
+	if err != nil {
+		logger.Log("Failed to parse kubeconfig: %v", err)
+		return
+	}
+	// Rename cluster, context, and user keys to nodeName
+	// (Assume only one entry for each in the original config)
+	var oldCluster, oldContext, oldUser string
+	for k := range config.Clusters {
+		oldCluster = k
+		break
+	}
+	for k := range config.Contexts {
+		oldContext = k
+		break
+	}
+	for k := range config.AuthInfos {
+		oldUser = k
+		break
+	}
+	if oldCluster != "" && oldCluster != nodeName {
+		config.Clusters[nodeName] = config.Clusters[oldCluster]
+		delete(config.Clusters, oldCluster)
+	}
+	if oldUser != "" && oldUser != nodeName {
+		config.AuthInfos[nodeName] = config.AuthInfos[oldUser]
+		delete(config.AuthInfos, oldUser)
+	}
+	if oldContext != "" && oldContext != nodeName {
+		config.Contexts[nodeName] = config.Contexts[oldContext]
+		delete(config.Contexts, oldContext)
+	}
+	// Update context to point to new cluster/user names
+	if ctx, ok := config.Contexts[nodeName]; ok {
+		ctx.Cluster = nodeName
+		ctx.AuthInfo = nodeName
+	}
+	config.CurrentContext = nodeName
+	newKubeConfig, err := clientcmd.Write(*config)
+	if err != nil {
+		logger.Log("Failed to marshal kubeconfig: %v", err)
+		return
+	}
 	kubeConfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, nodeName))
-	createFile(kubeConfigPath, kubeConfig)
+	createFile(kubeConfigPath, string(newKubeConfig))
 }
 
 // createFile creates a file with the specified content.
