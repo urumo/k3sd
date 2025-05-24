@@ -6,10 +6,13 @@ import (
 	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -78,7 +81,7 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			joinCmds := []string{
 				fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
 				fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token)),
-				fmt.Sprintf("kubectl label node %s %s --overwrite", worker.NodeName, worker.Labels),
+				fmt.Sprintf("kubectl label node %s %s --overwrite", worker.NodeName, worker.GetLabels()),
 			}
 			if err := ExecuteCommands(client, joinCmds, logger); err != nil {
 				return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
@@ -146,10 +149,11 @@ func sshConnect(userName, password, host string) (*ssh.Client, error) {
 	}
 
 	cfg := &ssh.ClientConfig{
-		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
+		User:            userName,
+		Auth:            authMethods,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
+
 	return ssh.Dial("tcp", host+":22", cfg)
 }
 
@@ -334,7 +338,7 @@ func baseClusterCommands(cluster Cluster) []string {
 		"unzip -o -j /tmp/source.zip -d /tmp/yamls",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",
-		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.Labels),
+		fmt.Sprintf("kubectl label node %s %s --overwrite", cluster.NodeName, cluster.GetLabels()),
 	}
 }
 
