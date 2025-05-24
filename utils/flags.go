@@ -10,6 +10,7 @@ var (
 	ConfigPath  string
 	Uninstall   bool
 	VersionFlag bool
+	Verbose     bool
 )
 
 func ParseFlags() {
@@ -24,11 +25,13 @@ func ParseFlags() {
 	linkerd := flag.Bool("linkerd", false, "Install linkerd")
 	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
+	verbose := flag.Bool("v", false, "Enable verbose stdout logging")
 
 	flag.Parse()
 
 	VersionFlag = *versionFlag
 	Uninstall = *uninstallFlag
+	Verbose = *verbose
 	Flags = map[string]bool{
 		"cert-manager":   *certManager,
 		"traefik-values": *traefik,
