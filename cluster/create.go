@@ -66,6 +66,13 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 		}
 	}
 	settings := cli.New()
+	// Use a project-local helm config/cache directory to avoid $HOME issues
+	helmDataDir := "./.helm"
+	if err := os.MkdirAll(helmDataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create local helm data dir: %w", err)
+	}
+	settings.RepositoryConfig = path.Join(helmDataDir, "repositories.yaml")
+	settings.RepositoryCache = path.Join(helmDataDir, "cache")
 	actionConfig := new(action.Configuration)
 	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), logger.Log); err != nil {
 		return fmt.Errorf("failed to init helm action config: %w", err)
@@ -74,26 +81,54 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 	install := action.NewUpgrade(actionConfig)
 	install.Namespace = namespace
 	install.Install = true
-	// install.CreateNamespace = true // Not available on Upgrade action
 	install.Atomic = true
 	install.Wait = true
 	install.Timeout = 300 // seconds
 
-	// Add repo if needed
-	repoEntry := &repo.Entry{
-		Name: repoName,
-		URL:  repoURL,
+	// Add repo if needed (idempotent)
+	repoFile := settings.RepositoryConfig
+	// Ensure the directory for the repo file exists
+	if err := os.MkdirAll(path.Dir(repoFile), 0755); err != nil {
+		return fmt.Errorf("failed to create helm repo config dir: %w", err)
 	}
-	// Use only helm.sh/helm/v3/pkg/getter and pass settings as environment.EnvSettings
-	// getter.All expects environment.EnvSettings, which is an interface implemented by *cli.EnvSettings
-	providers := getter.All(settings)
-	r, err := repo.NewChartRepository(repoEntry, providers)
+	repos, err := repo.LoadFile(repoFile)
 	if err != nil {
-		return fmt.Errorf("failed to create chart repo: %w", err)
+		if os.IsNotExist(err) {
+			repos = repo.NewFile()
+		} else {
+			return fmt.Errorf("failed to load helm repo file: %w", err)
+		}
 	}
-	_, err = r.DownloadIndexFile()
-	if err != nil {
-		return fmt.Errorf("failed to download repo index: %w", err)
+	found := false
+	if repos != nil {
+		for _, r := range repos.Repositories {
+			if r.Name == repoName {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		repoEntry := &repo.Entry{
+			Name: repoName,
+			URL:  repoURL,
+		}
+		providers := getter.All(settings)
+		r, err := repo.NewChartRepository(repoEntry, providers)
+		if err != nil {
+			return fmt.Errorf("failed to create chart repo: %w", err)
+		}
+		if _, err = r.DownloadIndexFile(); err != nil {
+			return fmt.Errorf("failed to download repo index: %w", err)
+		}
+		if repos == nil {
+			repos = repo.NewFile()
+		}
+		repos.Update(repoEntry)
+		if err := repos.WriteFile(repoFile, 0644); err != nil {
+			return fmt.Errorf("failed to write helm repo file: %w", err)
+		}
+		logger.Log("Added helm repo %s", repoName)
 	}
 
 	// Load values
