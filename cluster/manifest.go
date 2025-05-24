@@ -19,7 +19,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// applyYAMLManifest applies a YAML manifest (from URL or file) using client-go dynamic client
 func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.Logger, substitutions map[string]string) error {
 	var data []byte
 	var err error

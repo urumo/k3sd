@@ -14,7 +14,6 @@ import (
 	"helm.sh/helm/v3/pkg/repo"
 )
 
-// installHelmChart installs or upgrades a Helm chart using the Go SDK, given repo, chart, version, and optional values file.
 func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile string, logger *utils.Logger) error {
 	settings := cli.New()
 	helmDataDir := "./.helm"
@@ -25,7 +24,6 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 	settings.RepositoryConfig = path.Join(helmDataDir, "repositories.yaml")
 	settings.RepositoryCache = path.Join(helmDataDir, "cache")
 
-	// Always update all repo caches before installing a chart (mimics 'helm repo update')
 	repoFile := settings.RepositoryConfig
 	reposForUpdate, err := repo.LoadFile(repoFile)
 	if err == nil && reposForUpdate != nil {
@@ -45,7 +43,6 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 		}
 	}
 
-	// Ensure namespace exists before installing the chart (handled in create.go)
 	actionConfig := new(action.Configuration)
 	err = actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), logger.Log)
 	if err != nil {
@@ -57,7 +54,7 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 	install.Install = true
 	install.Atomic = true
 	install.Wait = true
-	install.Timeout = 300 // seconds
+	install.Timeout = 300
 
 	// Add repo if needed (idempotent)
 	repoFile = settings.RepositoryConfig
