@@ -3,7 +3,7 @@ package cluster
 import (
 	"bufio"
 	"fmt"
-	"github.com/urumo/k3sd/utils"
+	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"io"
 	"log"
@@ -287,7 +287,7 @@ func baseClusterCommands(cluster Cluster) []string {
 	return []string{
 		"sudo apt-get update -y",
 		"sudo apt-get install curl wget zip unzip -y",
-		fmt.Sprintf("cd /tmp && curl -L -o source.zip $(curl -s https://api.github.com/repos/urumo/k3sd/releases/tags/%s | grep \"zipball_url\" | cut -d '\"' -f 4)", utils.Version),
+		fmt.Sprintf("cd /tmp && curl -L -o source.zip $(curl -s https://api.github.com/repos/argon-chat/k3sd/releases/tags/%s | grep \"zipball_url\" | cut -d '\"' -f 4)", utils.Version),
 		"unzip -o -j /tmp/source.zip -d /tmp/yamls",
 		"curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--disable traefik\" K3S_KUBECONFIG_MODE=\"644\" sh -",
 		"sleep 10",

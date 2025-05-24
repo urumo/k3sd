@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/urumo/k3sd/utils"
+	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 	"io"
 )
@@ -39,7 +39,14 @@ func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to create session: %v", err)
 	}
-	defer session.Close()
+	defer func(session *ssh.Session) {
+		err := session.Close()
+		if err != nil {
+			logger.LogErr("Error closing SSH session: %v\n", err)
+		} else {
+			logger.Log("SSH session closed successfully.\n")
+		}
+	}(session)
 
 	stdout, _ := session.StdoutPipe()
 	stderr, _ := session.StderrPipe()
@@ -82,7 +89,14 @@ func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %v", err)
 	}
-	defer session.Close()
+	defer func(session *ssh.Session) {
+		err := session.Close()
+		if err != nil {
+			logger.LogErr("Error closing SSH session: %v\n", err)
+		} else {
+			logger.Log("SSH session closed successfully.\n")
+		}
+	}(session)
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout

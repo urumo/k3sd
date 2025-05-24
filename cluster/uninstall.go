@@ -2,7 +2,7 @@ package cluster
 
 import (
 	"fmt"
-	"github.com/urumo/k3sd/utils"
+	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,7 +30,14 @@ func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, erro
 		if err != nil {
 			return nil, fmt.Errorf("Error connecting to cluster %s: %v\n", cluster.Address, err)
 		}
-		defer client.Close()
+		defer func(client *ssh.Client) {
+			err := client.Close()
+			if err != nil {
+				logger.LogErr("Error closing SSH connection to %s: %v\n", cluster.Address, err)
+			} else {
+				logger.Log("SSH connection to %s closed successfully.\n", cluster.Address)
+			}
+		}(client)
 
 		// Uninstall K3s agent from each worker node in the cluster.
 		for wi, worker := range cluster.Workers {

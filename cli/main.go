@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/urumo/k3sd/cluster"
-	"github.com/urumo/k3sd/utils"
+	"github.com/argon-chat/k3sd/cluster"
+	"github.com/argon-chat/k3sd/utils"
 	"log"
 	"os"
 	"os/exec"
@@ -12,7 +12,6 @@ import (
 )
 
 func main() {
-
 	utils.ParseFlags()
 
 	if utils.VersionFlag {
@@ -40,13 +39,19 @@ func main() {
 		response = strings.TrimSpace(strings.ToLower(response))
 
 		if response == "yes" {
-			cluster.UninstallCluster(clusters, logger)
+			clusters, err = cluster.UninstallCluster(clusters, logger)
+			if err != nil {
+				log.Fatalf("failed to uninstall clusters: %v", err)
+			}
 		} else {
 			fmt.Println("Uninstallation canceled.")
 			return
 		}
 	} else {
-		cluster.CreateCluster(clusters, logger, []string{})
+		clusters, err = cluster.CreateCluster(clusters, logger, []string{})
+		if err != nil {
+			log.Fatalf("failed to create clusters: %v", err)
+		}
 	}
 
 	if err := cluster.SaveClusters(utils.ConfigPath, clusters); err != nil {

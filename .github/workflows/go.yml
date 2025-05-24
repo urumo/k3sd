@@ -106,7 +106,7 @@ jobs:
 
       - name: Build for ${{ matrix.os }}_${{ matrix.arch }}
         run: |
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -v -ldflags "-X 'github.com/urumo/k3sd/utils.Version=${{ needs.determine-version.outputs.tag }}'" -o k3sd${{ matrix.extension }} ./cli/main.go
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -v -ldflags "-X 'github.com/argon-chat/k3sd/utils.Version=${{ needs.determine-version.outputs.tag }}'" -o k3sd${{ matrix.extension }} ./cli/main.go
           file k3sd${{ matrix.extension }}
           chmod +x k3sd${{ matrix.extension }}
           tar -czvf k3sd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz k3sd${{ matrix.extension }}
@@ -136,7 +136,7 @@ jobs:
           release_name: Release ${{ needs.determine-version.outputs.tag }}
           draft: false
           body: |
-            **Full Changelog**: https://github.com/urumo/k3sd/compare/${{ needs.determine-version.outputs.current_tag }}...${{ needs.determine-version.outputs.tag }}
+            **Full Changelog**: https://github.com/argon-chat/k3sd/compare/${{ needs.determine-version.outputs.current_tag }}...${{ needs.determine-version.outputs.tag }}
           prerelease: false
 
       - name: Upload Linux AMD64 Release Asset
