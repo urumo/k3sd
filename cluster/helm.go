@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 
@@ -119,7 +118,7 @@ func installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL,
 
 	vals := map[string]interface{}{}
 	if valuesFile != "" {
-		valuesBytes, err := ioutil.ReadFile(valuesFile)
+		valuesBytes, err := os.ReadFile(valuesFile)
 		if err != nil {
 			return fmt.Errorf("failed to read values file: %w", err)
 		}
