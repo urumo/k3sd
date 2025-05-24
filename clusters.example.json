@@ -23,7 +23,7 @@
       {
         "address": "10.144.103.64",
         "user": "ubuntu",
-        "password": "pass2",
+        "password": "password123",
         "nodeName": "worker1",
         "labels": {},
         "done": false
