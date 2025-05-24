@@ -4,10 +4,79 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
+
 	"github.com/argon-chat/k3sd/utils"
 	"golang.org/x/crypto/ssh"
-	"io"
 )
+
+// sshConnect establishes an SSH connection to a remote host.
+//
+// Parameters:
+// - user: The username for the SSH connection.
+// - pass: The password for the SSH connection.
+// - host: The address of the remote host.
+//
+// Returns:
+// - A pointer to an ssh.Client instance.
+// - An error if the connection fails.
+func sshConnect(userName, password, host string) (*ssh.Client, error) {
+	var authMethods []ssh.AuthMethod
+
+	usr, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("could not get current user: %w", err)
+	}
+	sshDir := filepath.Join(usr.HomeDir, ".ssh")
+
+	err = filepath.WalkDir(sshDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+
+		if strings.HasSuffix(d.Name(), ".pub") {
+			return nil
+		}
+
+		if _, err := os.Stat(path + ".pub"); err == nil {
+			keyBytes, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			signer, err := ssh.ParsePrivateKey(keyBytes)
+			if err != nil {
+				return nil
+			}
+			authMethods = append(authMethods, ssh.PublicKeys(signer))
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed loading SSH keys: %w", err)
+	}
+
+	if password != "" {
+		authMethods = append(authMethods, ssh.Password(password))
+	}
+
+	if len(authMethods) == 0 {
+		return nil, fmt.Errorf("no usable SSH authentication methods found")
+	}
+
+	cfg := &ssh.ClientConfig{
+		User:            userName,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	return ssh.Dial("tcp", host+":22", cfg)
+}
 
 // ExecuteCommands runs a list of commands on a remote server via SSH.
 //
