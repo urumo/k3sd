@@ -17,7 +17,7 @@
         "db": "dbname"
       }
     },
-    "privateNet": true,
+    "privateNet": false,
     "workers": [
       {
         "address": "10.144.103.64",
