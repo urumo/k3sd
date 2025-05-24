@@ -20,7 +20,7 @@ func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, erro
 		// Use shared sshConnect for connecting to the cluster.
 		client, err := sshConnect(cluster.User, cluster.Password, cluster.Address)
 		if err != nil {
-			return nil, fmt.Errorf("Error connecting to cluster %s: %v\n", cluster.Address, err)
+			return nil, fmt.Errorf("error connecting to cluster %s: %v", cluster.Address, err)
 		}
 		defer func(client *ssh.Client) {
 			err := client.Close()
