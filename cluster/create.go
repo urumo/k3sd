@@ -3,8 +3,6 @@ package cluster
 import (
 	"bufio"
 	"fmt"
-	"github.com/argon-chat/k3sd/utils"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"io/fs"
 	"log"
@@ -14,6 +12,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/argon-chat/k3sd/utils"
+	"golang.org/x/crypto/ssh"
 )
 
 // CreateCluster sets up a Kubernetes cluster and its workers, installs optional applications,
@@ -42,16 +43,27 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 		}(client)
 
 		if !cluster.Done {
-			// Prepare and execute commands for setting up the cluster.
-			cmds := append(baseClusterCommands(cluster), additional...)
-			appendOptionalApps(&cmds, cluster.Domain, cluster.Gitea.Pg)
+			// Step 1: Run only the base cluster setup commands.
+			baseCmds := append(baseClusterCommands(cluster), additional...)
 			logger.Log("Connecting to cluster: %s", cluster.Address)
-			if err := ExecuteCommands(client, cmds, logger); err != nil {
+			if err := ExecuteCommands(client, baseCmds, logger); err != nil {
 				return nil, fmt.Errorf("exec master: %v", err)
 			}
 			cl := &clusters[ci]
 			cl.Done = true
+
+			// Step 2: Save kubeconfig to disk.
 			saveKubeConfig(client, cluster, cl.NodeName, logger)
+
+			// Step 3: Run all optional app setup commands (after kubeconfig is saved).
+			var appCmds []string
+			appendOptionalApps(&appCmds, cluster.Domain, cluster.Gitea.Pg)
+			if len(appCmds) > 0 {
+				logger.Log("Running optional app setup on cluster: %s", cluster.Address)
+				if err := ExecuteCommands(client, appCmds, logger); err != nil {
+					return nil, fmt.Errorf("optional app setup failed: %v", err)
+				}
+			}
 
 			// Install Linkerd if specified in the flags.
 			if utils.Flags["linkerd"] {
