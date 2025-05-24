@@ -2,8 +2,8 @@
 
 if ! command -v multipass &> /dev/null
 then
-    echo "multipass could not be found"
-    exit
+  echo "Error: multipass could not be found. Please install multipass first."
+  exit 1
 fi
 
 multipass delete node1 node2 --purge
