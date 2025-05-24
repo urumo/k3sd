@@ -34,32 +34,24 @@ func sshConnect(userName, password, host string) (*ssh.Client, error) {
 	}
 	sshDir := filepath.Join(usr.HomeDir, ".ssh")
 
-	err = filepath.WalkDir(sshDir, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(sshDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-
 		if strings.HasSuffix(d.Name(), ".pub") {
 			return nil
 		}
-
-		if _, err := os.Stat(path + ".pub"); err == nil {
-			keyBytes, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			signer, err := ssh.ParsePrivateKey(keyBytes)
-			if err != nil {
-				return nil
-			}
-			authMethods = append(authMethods, ssh.PublicKeys(signer))
+		keyBytes, err := os.ReadFile(path)
+		if err != nil {
+			return nil
 		}
+		signer, err := ssh.ParsePrivateKey(keyBytes)
+		if err != nil {
+			return nil
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
 		return nil
 	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed loading SSH keys: %w", err)
-	}
 
 	if password != "" {
 		authMethods = append(authMethods, ssh.Password(password))
@@ -112,8 +104,6 @@ func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 		err := session.Close()
 		if err != nil {
 			logger.LogErr("Error closing SSH session: %v\n", err)
-		} else {
-			logger.Log("SSH session closed successfully.\n")
 		}
 	}(session)
 
@@ -162,8 +152,6 @@ func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger
 		err := session.Close()
 		if err != nil {
 			logger.LogErr("Error closing SSH session: %v\n", err)
-		} else {
-			logger.Log("SSH session closed successfully.\n")
 		}
 	}(session)
 
