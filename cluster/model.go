@@ -9,10 +9,11 @@ import "fmt"
 //   - Gitea: A Gitea configuration object containing PostgreSQL credentials.
 //   - Workers: A slice of Worker objects representing the workers in the cluster.
 type Cluster struct {
-	Worker           // Embeds the Worker struct, inheriting its fields and methods.
-	Domain  string   `json:"domain"`  // The domain name associated with the cluster.
-	Gitea   Gitea    `json:"gitea"`   // Gitea configuration for the cluster.
-	Workers []Worker `json:"workers"` // List of worker nodes in the cluster.
+	Worker              // Embeds the Worker struct, inheriting its fields and methods.
+	Domain     string   `json:"domain"`     // The domain name associated with the cluster.
+	Gitea      Gitea    `json:"gitea"`      // Gitea configuration for the cluster.
+	PrivateNet bool     `json:"privateNet"` // Indicates if the cluster uses a private network.
+	Workers    []Worker `json:"workers"`    // List of worker nodes in the cluster.
 }
 
 // Worker represents a worker node in the cluster.
