@@ -1,6 +1,6 @@
 [
   {
-    "address": "192.168.64.18",
+    "address": "10.144.103.55",
     "user": "ubuntu",
     "password": "password123",
     "nodeName": "master",
@@ -21,7 +21,7 @@
     "privateNet": true,
     "workers": [
       {
-        "address": "192.168.64.19",
+        "address": "10.144.103.64",
         "user": "ubuntu",
         "password": "pass2",
         "nodeName": "worker1",
