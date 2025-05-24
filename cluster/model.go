@@ -1,5 +1,7 @@
 package cluster
 
+import "fmt"
+
 // Cluster represents a cluster configuration, including its domain and associated workers.
 //
 // Fields:
@@ -23,12 +25,12 @@ type Cluster struct {
 //   - Labels: The labels assigned to the node for identification or grouping.
 //   - Done: A boolean indicating whether the worker setup is complete.
 type Worker struct {
-	Address  string `json:"address"`  // IP address or hostname of the worker node.
-	User     string `json:"user"`     // Username for connecting to the worker node.
-	Password string `json:"password"` // Password for authenticating the connection.
-	NodeName string `json:"nodeName"` // Name of the node in the cluster.
-	Labels   string `json:"labels"`   // Labels for identification or grouping.
-	Done     bool   `json:"done"`     // Indicates if the worker setup is complete.
+	Address  string            `json:"address"`  // IP address or hostname of the worker node.
+	User     string            `json:"user"`     // Username for connecting to the worker node.
+	Password string            `json:"password"` // Password for authenticating the connection.
+	NodeName string            `json:"nodeName"` // Name of the node in the cluster.
+	Labels   map[string]string `json:"labels"`   // Labels for identification or grouping.
+	Done     bool              `json:"done"`     // Indicates if the worker setup is complete.
 }
 
 // Gitea represents the Gitea configuration for the cluster.
@@ -49,4 +51,15 @@ type Pg struct {
 	Username string `json:"user"`     // Username for the PostgreSQL database.
 	Password string `json:"password"` // Password for the PostgreSQL database.
 	DbName   string `json:"db"`       // Name of the PostgreSQL database.
+}
+
+func (worker *Worker) GetLabels() string {
+	labels := ""
+	for k, v := range worker.Labels {
+		labels += fmt.Sprintf("%s=%s,", k, v)
+	}
+	if len(labels) > 0 {
+		labels = labels[:len(labels)-1]
+	}
+	return labels
 }
