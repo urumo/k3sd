@@ -6,12 +6,17 @@ then
   exit 1
 fi
 
-multipass launch --name node1 --cpus 2 --mem 2G --disk 20G
-multipass launch --name node2 --cpus 2 --mem 2G --disk 20G
+multipass launch --name node1 --cpus 2 --memory 2G --disk 20G
+multipass launch --name node2 --cpus 2 --memory 2G --disk 20G
 
 PASS=${MPS_PASSWORD:-password123}
-multipass exec node1 -- sudo bash -c "echo ubuntu:${PASS} | chpasswd"
-multipass exec node2 -- sudo bash -c "echo ubuntu:${PASS} | chpasswd"
+multipass exec node1 -- sudo bash -c "echo ubuntu:${PASS} | sudo chpasswd"
+multipass exec node2 -- sudo bash -c "echo ubuntu:${PASS} | sudo chpasswd"
 
-multipass info --all | grep "IPv4"
+for key in ~/.ssh/*.pub; do
+  multipass exec node1 -- bash -c "echo '$(cat "$key")' >> ~/.ssh/authorized_keys"
+  multipass exec node2 -- bash -c "echo '$(cat "$key")' >> ~/.ssh/authorized_keys"
+done
+
+multipass info | grep "IPv4"
 

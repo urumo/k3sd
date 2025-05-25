@@ -3,12 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/argon-chat/k3sd/cluster"
-	"github.com/argon-chat/k3sd/utils"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/argon-chat/k3sd/cluster"
+	"github.com/argon-chat/k3sd/utils"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	go logger.LogWorkerFile()
 	go logger.LogWorkerCmd()
 
-	checkCommandExists()
+	// checkCommandExists()
 
 	if utils.Uninstall {
 		reader := bufio.NewReader(os.Stdin)

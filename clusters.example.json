@@ -1,26 +1,30 @@
 [
   {
-    "address": "ip",
-    "user": "user",
-    "password": "pass",
+    "address": "10.144.103.55",
+    "user": "ubuntu",
+    "password": "password123",
     "nodeName": "master",
-    "labels": "label1=value1",
-    "done": false, // should be false by default, only the program should set it to true, which means that setup was a success
-    "domain": "example.com", // only needed if you are going to install cluster issuer and cert manager
+    "labels": {
+      "label1": "value1",
+      "label2": "value2"
+    },
+    "done": false,
+    "domain": "example.com",
     "gitea": {
       "pg": {
         "user": "user",
-        "password": "passwoed",
+        "password": "password123",
         "db": "dbname"
       }
     },
+    "privateNet": false,
     "workers": [
       {
-        "address": "ip2",
-        "user": "user2",
-        "password": "pass2",
+        "address": "10.144.103.64",
+        "user": "ubuntu",
+        "password": "password123",
         "nodeName": "worker1",
-        "labels": "",
+        "labels": {},
         "done": false
       }
     ]

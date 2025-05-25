@@ -1,3 +1,5 @@
+crds:
+  create: true
 defaultRules:
   create: true
   rules:
