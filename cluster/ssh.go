@@ -69,14 +69,13 @@ func ExecuteCommands(client *ssh.Client, commands []string, logger *utils.Logger
 }
 func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 	session, err := client.NewSession()
+	logIfError(logger, err, "failed to create session: %v")
 	if err != nil {
 		return fmt.Errorf("failed to create session: %v", err)
 	}
 	defer func(session *ssh.Session) {
 		err := session.Close()
-		if err != nil && err.Error() != "EOF" {
-			logger.LogErr("Error closing SSH session: %v\n", err)
-		}
+		logIfError(logger, err, "Error closing SSH session: %v\n")
 	}(session)
 
 	stdout, _ := session.StdoutPipe()
@@ -85,7 +84,7 @@ func runCommand(client *ssh.Client, cmd string, logger *utils.Logger) error {
 	go streamOutput(stdout, false, logger)
 	go streamOutput(stderr, true, logger)
 
-	logger.LogCmd(cmd)
+	logger.LogCmd("%s", cmd)
 	return session.Run(cmd)
 }
 func streamOutput(r io.Reader, isErr bool, logger *utils.Logger) {
@@ -101,14 +100,13 @@ func streamOutput(r io.Reader, isErr bool, logger *utils.Logger) {
 }
 func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger) (string, error) {
 	session, err := client.NewSession()
+	logIfError(logger, err, "failed to create session: %v")
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %v", err)
 	}
 	defer func(session *ssh.Session) {
 		err := session.Close()
-		if err != nil && err.Error() != "EOF" {
-			logger.LogErr("Error closing SSH session: %v\n", err)
-		}
+		logIfError(logger, err, "Error closing SSH session: %v\n")
 	}(session)
 
 	var stdout, stderr bytes.Buffer
@@ -116,7 +114,7 @@ func ExecuteRemoteScript(client *ssh.Client, script string, logger *utils.Logger
 	session.Stderr = &stderr
 
 	command := fmt.Sprintf("bash -c '%s'", script)
-	logger.LogCmd(command)
+	logger.LogCmd("%s", command)
 	if err := session.Run(command); err != nil {
 		return "", fmt.Errorf("error executing script: %v, stderr: %s", err, stderr.String())
 	}
