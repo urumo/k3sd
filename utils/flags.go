@@ -14,17 +14,32 @@ var (
 	HelmAtomic  bool
 )
 
+type boolFlagDef struct {
+	Name        string
+	Default     bool
+	Description string
+	MapKey      string
+}
+
 func ParseFlags() {
-	certManager := flag.Bool("cert-manager", false, "Apply the cert-manager YAMLs")
-	traefik := flag.Bool("traefik", false, "Apply the Traefik YAML")
-	clusterIssuer := flag.Bool("cluster-issuer", false, "Apply the Cluster Issuer YAML, need to specify `domain` in your config json")
-	gitea := flag.Bool("gitea", false, "Apply the Gitea YAML")
-	giteaIngress := flag.Bool("gitea-ingress", false, "Apply the Gitea Ingress YAML, need to specify `domain` in your config json")
+	boolFlags := []boolFlagDef{
+		{"cert-manager", false, "Apply the cert-manager YAMLs", "cert-manager"},
+		{"traefik", false, "Apply the Traefik YAML", "traefik-values"},
+		{"cluster-issuer", false, "Apply the Cluster Issuer YAML, need to specify `domain` in your config json", "clusterissuer"},
+		{"gitea", false, "Apply the Gitea YAML", "gitea"},
+		{"gitea-ingress", false, "Apply the Gitea Ingress YAML, need to specify `domain` in your config json", "gitea-ingress"},
+		{"prometheus", false, "Apply the Prometheus YAML", "prometheus"},
+		{"linkerd", false, "Install linkerd", "linkerd"},
+		{"linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)", "linkerd-mc"},
+	}
+
+	flagPtrs := make(map[string]*bool)
+	for _, def := range boolFlags {
+		flagPtrs[def.MapKey] = flag.Bool(def.Name, def.Default, def.Description)
+	}
+
 	configPath := flag.String("config-path", "", "Path to clusters.json")
-	prometheus := flag.Bool("prometheus", false, "Apply the Prometheus YAML")
 	uninstallFlag := flag.Bool("uninstall", false, "Uninstall the cluster")
-	linkerd := flag.Bool("linkerd", false, "Install linkerd")
-	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	verbose := flag.Bool("v", false, "Enable verbose stdout logging")
 	helmAtomic := flag.Bool("helm-atomic", false, "Enable --atomic for all Helm operations (rollback on failure)")
@@ -35,15 +50,10 @@ func ParseFlags() {
 	Uninstall = *uninstallFlag
 	Verbose = *verbose
 	HelmAtomic = *helmAtomic
-	Flags = map[string]bool{
-		"cert-manager":   *certManager,
-		"traefik-values": *traefik,
-		"clusterissuer":  *clusterIssuer,
-		"gitea":          *gitea,
-		"prometheus":     *prometheus,
-		"gitea-ingress":  *giteaIngress,
-		"linkerd":        *linkerd,
-		"linkerd-mc":     *linkerdMc,
+
+	Flags = make(map[string]bool)
+	for k, ptr := range flagPtrs {
+		Flags[k] = *ptr
 	}
 
 	if *configPath != "" {
