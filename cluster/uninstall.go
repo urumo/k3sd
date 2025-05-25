@@ -7,6 +7,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func uninstallWorker(client *ssh.Client, worker Worker, clusterAddress string, logger *utils.Logger) error {
+	cmd := fmt.Sprintf("ssh %s@%s \"k3s-agent-uninstall.sh\"", worker.User, worker.Address)
+	err := ExecuteCommands(client, []string{cmd}, logger)
+	logIfError(logger, err, "Error uninstalling worker on %s: %v", clusterAddress)
+	return err
+}
+
+func uninstallMaster(client *ssh.Client, clusterAddress string, logger *utils.Logger) error {
+	err := ExecuteCommands(client, []string{"k3s-uninstall.sh"}, logger)
+	logIfError(logger, err, "Error uninstalling master on %s: %v", clusterAddress)
+	return err
+}
 func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, error) {
 	for ci, cluster := range clusters {
 		client, err := sshConnect(cluster.User, cluster.Password, cluster.Address)
@@ -24,22 +36,15 @@ func UninstallCluster(clusters []Cluster, logger *utils.Logger) ([]Cluster, erro
 
 		for wi, worker := range cluster.Workers {
 			if worker.Done {
-				if err := ExecuteCommands(client, []string{
-					fmt.Sprintf("ssh %s@%s \"k3s-agent-uninstall.sh\"", worker.User, worker.Address),
-				}, logger); err != nil {
-					logger.Log("Error uninstalling worker on %s: %v\n", cluster.Address, err)
-				}
+				_ = uninstallWorker(client, worker, cluster.Address, logger)
 				clusters[ci].Workers[wi].Done = false
 			}
 		}
 
 		if cluster.Done {
-			if err := ExecuteCommands(client, []string{"k3s-uninstall.sh"}, logger); err != nil {
-				logger.Log("Error uninstalling master on %s: %v\n", cluster.Address, err)
-			}
+			_ = uninstallMaster(client, cluster.Address, logger)
 			clusters[ci].Done = false
 		}
 	}
-
 	return clusters, nil
 }
