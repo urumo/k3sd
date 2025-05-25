@@ -22,8 +22,8 @@ import (
 )
 
 func logIfError(logger *utils.Logger, err error, format string, args ...interface{}) {
-	if err != nil {
-		logger.Log(format, append(args, err)...)
+	if err != nil && err.Error() != "EOF" {
+		logger.LogErr(format, append(args, err)...)
 	}
 }
 
