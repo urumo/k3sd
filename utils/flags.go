@@ -11,6 +11,7 @@ var (
 	Uninstall   bool
 	VersionFlag bool
 	Verbose     bool
+	HelmAtomic  bool
 )
 
 func ParseFlags() {
@@ -26,12 +27,14 @@ func ParseFlags() {
 	linkerdMc := flag.Bool("linkerd-mc", false, "Install linkerd multicluster(will install linkerd first)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	verbose := flag.Bool("v", false, "Enable verbose stdout logging")
+	helmAtomic := flag.Bool("helm-atomic", false, "Enable --atomic for all Helm operations (rollback on failure)")
 
 	flag.Parse()
 
 	VersionFlag = *versionFlag
 	Uninstall = *uninstallFlag
 	Verbose = *verbose
+	HelmAtomic = *helmAtomic
 	Flags = map[string]bool{
 		"cert-manager":   *certManager,
 		"traefik-values": *traefik,
