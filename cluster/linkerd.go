@@ -8,6 +8,10 @@ import (
 	"github.com/argon-chat/k3sd/utils"
 )
 
+func runStepCertCreate(args []string, logger *utils.Logger) {
+	cmd := exec.Command("step", args...)
+	pipeAndLog(cmd, logger)
+}
 func runLinkerdInstall(cluster Cluster, logger *utils.Logger, multicluster bool) {
 	dir := path.Join("./kubeconfigs", logger.Id)
 	kubeconfig := path.Join(dir, fmt.Sprintf("%s.yaml", cluster.NodeName))
@@ -51,18 +55,20 @@ func installCRDs(kubeconfig string, logger *utils.Logger) {
 }
 
 func createRootCerts(dir string, logger *utils.Logger) {
-	cmd := exec.Command("step", "certificate", "create",
+	args := []string{
+		"certificate", "create",
 		"identity.linkerd.cluster.local",
 		path.Join(dir, "ca.crt"),
 		path.Join(dir, "ca.key"),
 		"--profile", "root-ca",
 		"--no-password", "--insecure", "--force", "--not-after", "438000h",
-	)
-	pipeAndLog(cmd, logger)
+	}
+	runStepCertCreate(args, logger)
 }
 
 func createIssuerCerts(dir string, cluster Cluster, logger *utils.Logger) {
-	cmd := exec.Command("step", "certificate", "create",
+	args := []string{
+		"certificate", "create",
 		fmt.Sprintf("identity.linkerd.%s", cluster.Domain),
 		path.Join(dir, fmt.Sprintf("%s-issuer.crt", cluster.NodeName)),
 		path.Join(dir, fmt.Sprintf("%s-issuer.key", cluster.NodeName)),
@@ -71,6 +77,6 @@ func createIssuerCerts(dir string, cluster Cluster, logger *utils.Logger) {
 		"--profile", "intermediate-ca",
 		"--not-after", "438000h",
 		"--no-password", "--insecure", "--force",
-	)
-	pipeAndLog(cmd, logger)
+	}
+	runStepCertCreate(args, logger)
 }
