@@ -32,6 +32,7 @@ func getKubeClient(kubeconfigPath string) (*kubernetes.Clientset, error) {
 	}
 	return clientset, nil
 }
+
 func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string) ([]Cluster, error) {
 	for ci, cluster := range clusters {
 		client, err := sshConnect(cluster.User, cluster.Password, cluster.Address)
@@ -39,183 +40,235 @@ func CreateCluster(clusters []Cluster, logger *utils.Logger, additional []string
 			return nil, err
 		}
 		defer func(client *ssh.Client) {
-			err := client.Close()
-			if err != nil {
-
-			}
+			_ = client.Close()
 		}(client)
 
 		if !cluster.Done {
-			baseCmds := append(baseClusterCommands(cluster), additional...)
-			logger.Log("Connecting to cluster: %s", cluster.Address)
-			if err := ExecuteCommands(client, baseCmds, logger); err != nil {
-				return nil, fmt.Errorf("exec master: %v", err)
-			}
-			cl := &clusters[ci]
-			cl.Done = true
-
-			saveKubeConfig(client, cluster, cl.NodeName, logger)
-
-			kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cl.NodeName))
-			clientset, err := getKubeClient(kubeconfigPath)
-			if err != nil {
-				logger.Log("Failed to create k8s client for master: %v", err)
-			} else {
-				labelBytes, err := json.Marshal(cluster.Labels)
-				if err != nil {
-					logger.Log("Failed to marshal master node labels: %v", err)
-				} else {
-					patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
-					_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-					if err != nil {
-						logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
-					} else {
-						logger.Log("Labeled master node %s", cluster.NodeName)
-					}
-				}
-				if err != nil {
-					logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
-				} else {
-					logger.Log("Labeled master node %s", cluster.NodeName)
-				}
-			}
-
-			if utils.Flags["cert-manager"] {
-				logger.Log("Applying cert-manager CRDs and deployment...")
-
-				err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
-				if err != nil {
-					logger.Log("cert-manager error: %v", err)
-				}
-				err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
-				if err != nil {
-					logger.Log("cert-manager CRDs error: %v", err)
-				}
-				logger.Log("Waiting for cert-manager deployment to be ready...")
-				time.Sleep(30 * time.Second)
-			}
-			if utils.Flags["traefik-values"] {
-				logger.Log("Applying traefik values...")
-				err := applyYAMLManifest(kubeconfigPath, "yamls/traefik-values.yaml", logger, nil)
-				if err != nil {
-					logger.Log("traefik-values error: %v", err)
-				}
-				// TODO: Add wait logic for traefik deployment readiness using client-go if needed
-			}
-			if utils.Flags["clusterissuer"] {
-				logger.Log("Applying clusterissuer...")
-				substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-				err := applyYAMLManifest(kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
-				if err != nil {
-					logger.Log("clusterissuer error: %v", err)
-				}
-			}
-			if utils.Flags["gitea"] {
-				logger.Log("Applying gitea...")
-				substitutions := map[string]string{
-					"${POSTGRES_USER}":     cluster.Gitea.Pg.Username,
-					"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
-					"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
-				}
-				err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
-				if err != nil {
-					logger.Log("gitea error: %v", err)
-				}
-				if utils.Flags["gitea-ingress"] {
-					logger.Log("Applying gitea ingress...")
-					substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-					err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
-					if err != nil {
-						logger.Log("gitea-ingress error: %v", err)
-					}
-				}
-			}
-			if utils.Flags["prometheus"] {
-				logger.Log("Installing Prometheus stack via Helm Go SDK...")
-				err := installHelmChart(
-					kubeconfigPath,
-					"kube-prom-stack",
-					"monitoring",
-					"prometheus-community",
-					"https://prometheus-community.github.io/helm-charts",
-					"kube-prometheus-stack",
-					"35.5.1",
-					"yamls/prom-stack-values.yaml",
-					logger,
-				)
-				if err != nil {
-					logger.Log("Prometheus stack error: %v", err)
-				}
-			}
-
-			if utils.Flags["linkerd"] {
-				runLinkerdInstall(cluster, logger, false)
-			}
-			if utils.Flags["linkerd-mc"] {
-				runLinkerdInstall(cluster, logger, true)
+			if err := setupMasterNode(&clusters[ci], client, logger, additional); err != nil {
+				return nil, err
 			}
 		}
 
-		for wi, worker := range cluster.Workers {
-			if worker.Done {
-				continue
-			}
-			cl := &clusters[ci].Workers[wi]
-			cl.Done = true
-
-			token, err := ExecuteRemoteScript(client, "echo $(k3s token create)", logger)
-			if err != nil {
-				logger.Log("token error for %s: %v", cluster.Address, err)
-				continue
-			}
-
-			if cluster.PrivateNet {
-				joinCmds := []string{
-					fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
-					fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token), worker.NodeName),
-				}
-				if err := ExecuteCommands(client, joinCmds, logger); err != nil {
-					return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
-				}
-			} else {
-				workerClient, err := sshConnect(worker.User, worker.Password, worker.Address)
-				if err != nil {
-					logger.Log("Failed to connect to worker %s directly: %v", worker.Address, err)
-					continue
-				}
-				defer workerClient.Close()
-				joinCmds := []string{
-					"sudo apt update && sudo apt install -y curl",
-					fmt.Sprintf("curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -", cluster.Address, strings.TrimSpace(token), worker.NodeName),
-				}
-				if err := ExecuteCommands(workerClient, joinCmds, logger); err != nil {
-					return nil, fmt.Errorf("worker join %s: %v", worker.Address, err)
-				}
-			}
-
-			kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cluster.NodeName))
-			clientset, err := getKubeClient(kubeconfigPath)
-			if err != nil {
-				logger.Log("Failed to create k8s client: %v", err)
-				continue
-			}
-			labelBytes, err := json.Marshal(worker.Labels)
-			if err != nil {
-				logger.Log("Failed to marshal worker node labels: %v", err)
-			} else {
-				patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
-				_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-				if err != nil {
-					logger.Log("Failed to label node %s: %v", worker.NodeName, err)
-				} else {
-					logger.Log("Labeled worker node %s", worker.NodeName)
-				}
-			}
+		if err := setupWorkerNodes(&clusters[ci], client, logger); err != nil {
+			return nil, err
 		}
 
 		logFiles(logger)
 	}
 	return clusters, nil
+}
+
+func setupMasterNode(cluster *Cluster, client *ssh.Client, logger *utils.Logger, additional []string) error {
+	if err := runBaseClusterSetup(cluster, client, logger, additional); err != nil {
+		return err
+	}
+	kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cluster.NodeName))
+	labelMasterNode(cluster, kubeconfigPath, logger)
+	applyOptionalComponents(cluster, kubeconfigPath, logger)
+	return nil
+}
+
+func runBaseClusterSetup(cluster *Cluster, client *ssh.Client, logger *utils.Logger, additional []string) error {
+	baseCmds := append(baseClusterCommands(*cluster), additional...)
+	logger.Log("Connecting to cluster: %s", cluster.Address)
+	if err := ExecuteCommands(client, baseCmds, logger); err != nil {
+		return fmt.Errorf("exec master: %v", err)
+	}
+	cluster.Done = true
+	saveKubeConfig(client, *cluster, cluster.NodeName, logger)
+	return nil
+}
+
+func labelMasterNode(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
+	clientset, err := getKubeClient(kubeconfigPath)
+	if err != nil {
+		logger.Log("Failed to create k8s client for master: %v", err)
+		return
+	}
+	labelBytes, err := json.Marshal(cluster.Labels)
+	if err != nil {
+		logger.Log("Failed to marshal master node labels: %v", err)
+		return
+	}
+	patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
+	_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	if err != nil {
+		logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
+	} else {
+		logger.Log("Labeled master node %s", cluster.NodeName)
+	}
+}
+
+func applyOptionalComponents(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
+	if utils.Flags["cert-manager"] {
+		applyCertManager(kubeconfigPath, logger)
+	}
+	if utils.Flags["traefik-values"] {
+		applyTraefikValues(kubeconfigPath, logger)
+	}
+	if utils.Flags["clusterissuer"] {
+		applyClusterIssuer(cluster, kubeconfigPath, logger)
+	}
+	if utils.Flags["gitea"] {
+		applyGitea(cluster, kubeconfigPath, logger)
+	}
+	if utils.Flags["prometheus"] {
+		applyPrometheus(kubeconfigPath, logger)
+	}
+	if utils.Flags["linkerd"] {
+		runLinkerdInstall(*cluster, logger, false)
+	}
+	if utils.Flags["linkerd-mc"] {
+		runLinkerdInstall(*cluster, logger, true)
+	}
+}
+
+func applyCertManager(kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Applying cert-manager CRDs and deployment...")
+	err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
+	if err != nil {
+		logger.Log("cert-manager error: %v", err)
+	}
+	err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
+	if err != nil {
+		logger.Log("cert-manager CRDs error: %v", err)
+	}
+	logger.Log("Waiting for cert-manager deployment to be ready...")
+	time.Sleep(30 * time.Second)
+}
+
+func applyTraefikValues(kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Applying traefik values...")
+	err := applyYAMLManifest(kubeconfigPath, "yamls/traefik-values.yaml", logger, nil)
+	if err != nil {
+		logger.Log("traefik-values error: %v", err)
+	}
+}
+
+func applyClusterIssuer(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Applying clusterissuer...")
+	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+	err := applyYAMLManifest(kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
+	if err != nil {
+		logger.Log("clusterissuer error: %v", err)
+	}
+}
+
+func applyGitea(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Applying gitea...")
+	substitutions := map[string]string{
+		"${POSTGRES_USER}":     cluster.Gitea.Pg.Username,
+		"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
+		"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
+	}
+	err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
+	if err != nil {
+		logger.Log("gitea error: %v", err)
+	}
+	if utils.Flags["gitea-ingress"] {
+		applyGiteaIngress(cluster, kubeconfigPath, logger)
+	}
+}
+
+func applyGiteaIngress(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Applying gitea ingress...")
+	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+	err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
+	if err != nil {
+		logger.Log("gitea-ingress error: %v", err)
+	}
+}
+
+func applyPrometheus(kubeconfigPath string, logger *utils.Logger) {
+	logger.Log("Installing Prometheus stack via Helm Go SDK...")
+	err := installHelmChart(
+		kubeconfigPath,
+		"kube-prom-stack",
+		"monitoring",
+		"prometheus-community",
+		"https://prometheus-community.github.io/helm-charts",
+		"kube-prometheus-stack",
+		"35.5.1",
+		"yamls/prom-stack-values.yaml",
+		logger,
+	)
+	if err != nil {
+		logger.Log("Prometheus stack error: %v", err)
+	}
+}
+
+func setupWorkerNodes(cluster *Cluster, client *ssh.Client, logger *utils.Logger) error {
+	for wi, worker := range cluster.Workers {
+		if worker.Done {
+			continue
+		}
+		if err := joinAndLabelWorker(cluster, &cluster.Workers[wi], client, logger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func joinAndLabelWorker(cluster *Cluster, worker *Worker, client *ssh.Client, logger *utils.Logger) error {
+	worker.Done = true
+	token, err := ExecuteRemoteScript(client, "echo $(k3s token create)", logger)
+	if err != nil {
+		logger.Log("token error for %s: %v", cluster.Address, err)
+		return nil
+	}
+	if err := joinWorker(cluster, worker, client, logger, token); err != nil {
+		return err
+	}
+	return labelWorkerNode(cluster, worker, logger)
+}
+
+func joinWorker(cluster *Cluster, worker *Worker, client *ssh.Client, logger *utils.Logger, token string) error {
+	if cluster.PrivateNet {
+		joinCmds := []string{
+			fmt.Sprintf("ssh %s@%s \"sudo apt update && sudo apt install -y curl\"", worker.User, worker.Address),
+			fmt.Sprintf("ssh %s@%s \"curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -\"", worker.User, worker.Address, cluster.Address, strings.TrimSpace(token), worker.NodeName),
+		}
+		if err := ExecuteCommands(client, joinCmds, logger); err != nil {
+			return fmt.Errorf("worker join %s: %v", worker.Address, err)
+		}
+	} else {
+		workerClient, err := sshConnect(worker.User, worker.Password, worker.Address)
+		if err != nil {
+			logger.Log("Failed to connect to worker %s directly: %v", worker.Address, err)
+			return nil
+		}
+		defer workerClient.Close()
+		joinCmds := []string{
+			"sudo apt update && sudo apt install -y curl",
+			fmt.Sprintf("curl -sfL https://get.k3s.io | K3S_URL=https://%s:6443 K3S_TOKEN='%s' INSTALL_K3S_EXEC='--node-name %s' sh -", cluster.Address, strings.TrimSpace(token), worker.NodeName),
+		}
+		if err := ExecuteCommands(workerClient, joinCmds, logger); err != nil {
+			return fmt.Errorf("worker join %s: %v", worker.Address, err)
+		}
+	}
+	return nil
+}
+
+func labelWorkerNode(cluster *Cluster, worker *Worker, logger *utils.Logger) error {
+	kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cluster.NodeName))
+	clientset, err := getKubeClient(kubeconfigPath)
+	if err != nil {
+		logger.Log("Failed to create k8s client: %v", err)
+		return nil
+	}
+	labelBytes, err := json.Marshal(worker.Labels)
+	if err != nil {
+		logger.Log("Failed to marshal worker node labels: %v", err)
+		return nil
+	}
+	patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
+	_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	if err != nil {
+		logger.Log("Failed to label node %s: %v", worker.NodeName, err)
+	} else {
+		logger.Log("Labeled worker node %s", worker.NodeName)
+	}
+	return nil
 }
 func pipeAndLog(cmd *exec.Cmd, logger *utils.Logger) {
 	outPipe, _ := cmd.StdoutPipe()
@@ -233,17 +286,23 @@ func pipeAndApply(cmd *exec.Cmd, kubeconfig string, logger *utils.Logger) {
 	_ = cmd.Start()
 
 	var yaml strings.Builder
-	go func(r io.Reader) {
-		scanner := bufio.NewScanner(r)
-		for scanner.Scan() {
-			yaml.WriteString(scanner.Text() + "\n")
-		}
-	}(stdout)
+	collectYAML(stdout, &yaml)
 	go streamOutput(stderr, true, logger)
 	_ = cmd.Wait()
 
+	applyYAMLToCluster(yaml.String(), kubeconfig, logger)
+}
+
+func collectYAML(r io.Reader, yaml *strings.Builder) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		yaml.WriteString(scanner.Text() + "\n")
+	}
+}
+
+func applyYAMLToCluster(yaml string, kubeconfig string, logger *utils.Logger) {
 	apply := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", "-")
-	apply.Stdin = strings.NewReader(yaml.String())
+	apply.Stdin = strings.NewReader(yaml)
 	out, err := apply.CombinedOutput()
 	if err != nil {
 		log.Fatalf("apply failed: %v\n%s", err, string(out))
