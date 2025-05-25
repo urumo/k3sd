@@ -19,32 +19,30 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.Logger, substitutions map[string]string) error {
-	var data []byte
-	var err error
+func getManifestData(manifestPathOrURL string) ([]byte, error) {
 	if strings.HasPrefix(manifestPathOrURL, "http://") || strings.HasPrefix(manifestPathOrURL, "https://") {
 		resp, err := http.Get(manifestPathOrURL)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer resp.Body.Close()
-		data, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-	} else {
-		data, err = os.ReadFile(manifestPathOrURL)
-		if err != nil {
-			return err
-		}
+		return io.ReadAll(resp.Body)
 	}
-	if substitutions != nil {
-		content := string(data)
-		for k, v := range substitutions {
-			content = strings.ReplaceAll(content, k, v)
-		}
-		data = []byte(content)
+	return os.ReadFile(manifestPathOrURL)
+}
+
+func applySubstitutions(data []byte, substitutions map[string]string) []byte {
+	if substitutions == nil {
+		return data
 	}
+	content := string(data)
+	for k, v := range substitutions {
+		content = strings.ReplaceAll(content, k, v)
+	}
+	return []byte(content)
+}
+
+func splitYAMLDocs(data []byte) []string {
 	var docs []string
 	rawDocs := strings.Split(string(data), "\n---")
 	for _, doc := range rawDocs {
@@ -54,6 +52,15 @@ func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.L
 		}
 		docs = append(docs, doc)
 	}
+	return docs
+}
+func applyYAMLManifest(kubeconfigPath, manifestPathOrURL string, logger *utils.Logger, substitutions map[string]string) error {
+	data, err := getManifestData(manifestPathOrURL)
+	if err != nil {
+		return err
+	}
+	data = applySubstitutions(data, substitutions)
+	docs := splitYAMLDocs(data)
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
