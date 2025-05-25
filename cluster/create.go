@@ -21,6 +21,44 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// DRY helper for installing Helm charts with logging and error handling
+func installHelmRelease(component, kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile string, logger *utils.Logger) {
+	logger.Log("Installing %s via Helm...", component)
+	if err := installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile, logger); err != nil {
+		logger.Log("%s Helm install error: %v", component, err)
+	}
+}
+
+// DRY helper for applying YAML manifests with logging and error handling
+func applyComponentYAML(component, kubeconfigPath, manifest string, logger *utils.Logger, substitutions map[string]string) {
+	logger.Log("Applying %s...", component)
+	if err := applyYAMLManifest(kubeconfigPath, manifest, logger, substitutions); err != nil {
+		logger.Log("%s error: %v", component, err)
+	}
+}
+
+// DRY: Generic node labeling function
+func labelNode(kubeconfigPath, nodeName string, labels map[string]string, logger *utils.Logger) error {
+	clientset, err := getKubeClient(kubeconfigPath)
+	if err != nil {
+		logger.Log("Failed to create k8s client for node %s: %v", nodeName, err)
+		return err
+	}
+	labelBytes, err := json.Marshal(labels)
+	if err != nil {
+		logger.Log("Failed to marshal node labels for %s: %v", nodeName, err)
+		return err
+	}
+	patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
+	_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	if err != nil {
+		logger.Log("Failed to label node %s: %v", nodeName, err)
+		return err
+	} else {
+		logger.Log("Labeled node %s", nodeName)
+	}
+	return nil
+}
 func getKubeClient(kubeconfigPath string) (*kubernetes.Clientset, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -80,23 +118,7 @@ func runBaseClusterSetup(cluster *Cluster, client *ssh.Client, logger *utils.Log
 }
 
 func labelMasterNode(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	clientset, err := getKubeClient(kubeconfigPath)
-	if err != nil {
-		logger.Log("Failed to create k8s client for master: %v", err)
-		return
-	}
-	labelBytes, err := json.Marshal(cluster.Labels)
-	if err != nil {
-		logger.Log("Failed to marshal master node labels: %v", err)
-		return
-	}
-	patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
-	_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), cluster.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-	if err != nil {
-		logger.Log("Failed to label master node %s: %v", cluster.NodeName, err)
-	} else {
-		logger.Log("Labeled master node %s", cluster.NodeName)
-	}
+	_ = labelNode(kubeconfigPath, cluster.NodeName, cluster.Labels, logger)
 }
 
 func applyOptionalComponents(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
@@ -124,64 +146,41 @@ func applyOptionalComponents(cluster *Cluster, kubeconfigPath string, logger *ut
 }
 
 func applyCertManager(kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Applying cert-manager CRDs and deployment...")
-	err := applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
-	if err != nil {
-		logger.Log("cert-manager error: %v", err)
-	}
-	err = applyYAMLManifest(kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
-	if err != nil {
-		logger.Log("cert-manager CRDs error: %v", err)
-	}
+	applyComponentYAML("cert-manager", kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml", logger, nil)
+	applyComponentYAML("cert-manager CRDs", kubeconfigPath, "https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.crds.yaml", logger, nil)
 	logger.Log("Waiting for cert-manager deployment to be ready...")
 	time.Sleep(30 * time.Second)
 }
 
 func applyTraefikValues(kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Applying traefik values...")
-	err := applyYAMLManifest(kubeconfigPath, "yamls/traefik-values.yaml", logger, nil)
-	if err != nil {
-		logger.Log("traefik-values error: %v", err)
-	}
+	applyComponentYAML("traefik-values", kubeconfigPath, "yamls/traefik-values.yaml", logger, nil)
 }
 
 func applyClusterIssuer(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Applying clusterissuer...")
 	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-	err := applyYAMLManifest(kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
-	if err != nil {
-		logger.Log("clusterissuer error: %v", err)
-	}
+	applyComponentYAML("clusterissuer", kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
 }
 
 func applyGitea(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Applying gitea...")
 	substitutions := map[string]string{
 		"${POSTGRES_USER}":     cluster.Gitea.Pg.Username,
 		"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
 		"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
 	}
-	err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
-	if err != nil {
-		logger.Log("gitea error: %v", err)
-	}
+	applyComponentYAML("gitea", kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
 	if utils.Flags["gitea-ingress"] {
 		applyGiteaIngress(cluster, kubeconfigPath, logger)
 	}
 }
 
 func applyGiteaIngress(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Applying gitea ingress...")
 	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
-	err := applyYAMLManifest(kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
-	if err != nil {
-		logger.Log("gitea-ingress error: %v", err)
-	}
+	applyComponentYAML("gitea-ingress", kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
 }
 
 func applyPrometheus(kubeconfigPath string, logger *utils.Logger) {
-	logger.Log("Installing Prometheus stack via Helm Go SDK...")
-	err := installHelmChart(
+	installHelmRelease(
+		"Prometheus stack",
 		kubeconfigPath,
 		"kube-prom-stack",
 		"monitoring",
@@ -192,9 +191,6 @@ func applyPrometheus(kubeconfigPath string, logger *utils.Logger) {
 		"yamls/prom-stack-values.yaml",
 		logger,
 	)
-	if err != nil {
-		logger.Log("Prometheus stack error: %v", err)
-	}
 }
 
 func setupWorkerNodes(cluster *Cluster, client *ssh.Client, logger *utils.Logger) error {
@@ -249,26 +245,10 @@ func joinWorker(cluster *Cluster, worker *Worker, client *ssh.Client, logger *ut
 	return nil
 }
 
+// DRY: Use generic node labeling function
 func labelWorkerNode(cluster *Cluster, worker *Worker, logger *utils.Logger) error {
 	kubeconfigPath := path.Join("./kubeconfigs", fmt.Sprintf("%s/%s.yaml", logger.Id, cluster.NodeName))
-	clientset, err := getKubeClient(kubeconfigPath)
-	if err != nil {
-		logger.Log("Failed to create k8s client: %v", err)
-		return nil
-	}
-	labelBytes, err := json.Marshal(worker.Labels)
-	if err != nil {
-		logger.Log("Failed to marshal worker node labels: %v", err)
-		return nil
-	}
-	patch := fmt.Sprintf(`{"metadata":{"labels":%s}}`, string(labelBytes))
-	_, err = clientset.CoreV1().Nodes().Patch(context.TODO(), worker.NodeName, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
-	if err != nil {
-		logger.Log("Failed to label node %s: %v", worker.NodeName, err)
-	} else {
-		logger.Log("Labeled worker node %s", worker.NodeName)
-	}
-	return nil
+	return labelNode(kubeconfigPath, worker.NodeName, worker.Labels, logger)
 }
 func pipeAndLog(cmd *exec.Cmd, logger *utils.Logger) {
 	outPipe, _ := cmd.StdoutPipe()
