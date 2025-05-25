@@ -50,12 +50,12 @@ func (l *Logger) LogWorker() {
 		return
 	}
 	for logMessage := range l.Stdout {
-		log.Println(fmt.Sprintf("[stdout] %s", logMessage))
+		log.Printf("[stdout] %s", logMessage)
 	}
 }
 func (l *Logger) LogWorkerErr() {
 	for logMessage := range l.Stderr {
-		log.Println(fmt.Sprintf("[stderr] %s", logMessage))
+		log.Printf("[stderr] %s", logMessage)
 	}
 }
 func (l *Logger) LogWorkerFile() {
@@ -70,6 +70,6 @@ func (l *Logger) LogWorkerFile() {
 }
 func (l *Logger) LogWorkerCmd() {
 	for logMessage := range l.Cmd {
-		log.Println(fmt.Sprintf("[CMD] %s", logMessage))
+		log.Printf("[CMD] %s", logMessage)
 	}
 }
