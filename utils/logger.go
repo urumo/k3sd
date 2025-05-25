@@ -43,7 +43,7 @@ func (l *Logger) LogCmd(format string, args ...interface{}) {
 	l.Cmd <- fmt.Sprintf(format, args...)
 }
 func (l *Logger) LogWorker() {
-	if !VerboseFlag() {
+	if !Verbose {
 		for range l.Stdout {
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -52,9 +52,6 @@ func (l *Logger) LogWorker() {
 	for logMessage := range l.Stdout {
 		log.Println(fmt.Sprintf("[stdout] %s", logMessage))
 	}
-}
-func VerboseFlag() bool {
-	return Verbose
 }
 func (l *Logger) LogWorkerErr() {
 	for logMessage := range l.Stderr {
