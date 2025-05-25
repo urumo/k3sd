@@ -21,7 +21,37 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// DRY helper for installing Helm charts with logging and error handling
+func logIfError(logger *utils.Logger, err error, format string, args ...interface{}) {
+	if err != nil {
+		logger.Log(format, append(args, err)...)
+	}
+}
+
+func buildSubstitutions(pairs ...string) map[string]string {
+	subs := make(map[string]string)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		subs[pairs[i]] = pairs[i+1]
+	}
+	return subs
+}
+
+func forEachWorker(workers []Worker, fn func(*Worker) error) error {
+	for i := range workers {
+		if err := fn(&workers[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureNamespace(kubeconfigPath, namespace string, logger *utils.Logger) {
+	if namespace != "default" && namespace != "kube-system" {
+		cmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "create", "namespace", namespace)
+		_ = cmd.Run()
+		logger.Log("Ensured namespace %s exists", namespace)
+	}
+}
+
 func installHelmRelease(component, kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile string, logger *utils.Logger) {
 	logger.Log("Installing %s via Helm...", component)
 	if err := installHelmChart(kubeconfigPath, releaseName, namespace, repoName, repoURL, chartName, chartVersion, valuesFile, logger); err != nil {
@@ -29,7 +59,6 @@ func installHelmRelease(component, kubeconfigPath, releaseName, namespace, repoN
 	}
 }
 
-// DRY helper for applying YAML manifests with logging and error handling
 func applyComponentYAML(component, kubeconfigPath, manifest string, logger *utils.Logger, substitutions map[string]string) {
 	logger.Log("Applying %s...", component)
 	if err := applyYAMLManifest(kubeconfigPath, manifest, logger, substitutions); err != nil {
@@ -37,7 +66,6 @@ func applyComponentYAML(component, kubeconfigPath, manifest string, logger *util
 	}
 }
 
-// DRY: Generic node labeling function
 func labelNode(kubeconfigPath, nodeName string, labels map[string]string, logger *utils.Logger) error {
 	clientset, err := getKubeClient(kubeconfigPath)
 	if err != nil {
@@ -157,16 +185,16 @@ func applyTraefikValues(kubeconfigPath string, logger *utils.Logger) {
 }
 
 func applyClusterIssuer(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+	substitutions := buildSubstitutions("${DOMAIN}", cluster.Domain, "DOMAIN", cluster.Domain)
 	applyComponentYAML("clusterissuer", kubeconfigPath, "yamls/clusterissuer.yaml", logger, substitutions)
 }
 
 func applyGitea(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	substitutions := map[string]string{
-		"${POSTGRES_USER}":     cluster.Gitea.Pg.Username,
-		"${POSTGRES_PASSWORD}": cluster.Gitea.Pg.Password,
-		"${POSTGRES_DB}":       cluster.Gitea.Pg.DbName,
-	}
+	substitutions := buildSubstitutions(
+		"${POSTGRES_USER}", cluster.Gitea.Pg.Username,
+		"${POSTGRES_PASSWORD}", cluster.Gitea.Pg.Password,
+		"${POSTGRES_DB}", cluster.Gitea.Pg.DbName,
+	)
 	applyComponentYAML("gitea", kubeconfigPath, "yamls/gitea.yaml", logger, substitutions)
 	if utils.Flags["gitea-ingress"] {
 		applyGiteaIngress(cluster, kubeconfigPath, logger)
@@ -174,11 +202,12 @@ func applyGitea(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
 }
 
 func applyGiteaIngress(cluster *Cluster, kubeconfigPath string, logger *utils.Logger) {
-	substitutions := map[string]string{"${DOMAIN}": cluster.Domain, "DOMAIN": cluster.Domain}
+	substitutions := buildSubstitutions("${DOMAIN}", cluster.Domain, "DOMAIN", cluster.Domain)
 	applyComponentYAML("gitea-ingress", kubeconfigPath, "yamls/gitea.ingress.yaml", logger, substitutions)
 }
 
 func applyPrometheus(kubeconfigPath string, logger *utils.Logger) {
+	ensureNamespace(kubeconfigPath, "monitoring", logger)
 	installHelmRelease(
 		"Prometheus stack",
 		kubeconfigPath,
@@ -194,22 +223,19 @@ func applyPrometheus(kubeconfigPath string, logger *utils.Logger) {
 }
 
 func setupWorkerNodes(cluster *Cluster, client *ssh.Client, logger *utils.Logger) error {
-	for wi, worker := range cluster.Workers {
+	return forEachWorker(cluster.Workers, func(worker *Worker) error {
 		if worker.Done {
-			continue
+			return nil
 		}
-		if err := joinAndLabelWorker(cluster, &cluster.Workers[wi], client, logger); err != nil {
-			return err
-		}
-	}
-	return nil
+		return joinAndLabelWorker(cluster, worker, client, logger)
+	})
 }
 
 func joinAndLabelWorker(cluster *Cluster, worker *Worker, client *ssh.Client, logger *utils.Logger) error {
 	worker.Done = true
 	token, err := ExecuteRemoteScript(client, "echo $(k3s token create)", logger)
+	logIfError(logger, err, "token error for %s: %v", cluster.Address)
 	if err != nil {
-		logger.Log("token error for %s: %v", cluster.Address, err)
 		return nil
 	}
 	if err := joinWorker(cluster, worker, client, logger, token); err != nil {
